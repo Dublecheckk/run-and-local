@@ -1,6 +1,6 @@
 'use client';
 /* oxlint-disable next/no-img-element -- Local photos are also bundled in native apps without a Next image server. */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { currentPosition, exportFile } from '@/lib/device';
 import {
   elapsed,
@@ -82,11 +82,13 @@ import {
   parseProfile,
   type RunnerProfile,
 } from '@/lib/profile';
+import type { PlaceCandidate } from '@/lib/destination-recommender';
 
 type LocalPoi = Poi & {
   openingHours?: string | null;
   address?: string | null;
   osmUrl: string;
+  source?: 'kakao' | 'osm';
 };
 interface LocalGraph extends GraphData {
   pois: LocalPoi[];
@@ -108,6 +110,12 @@ const categories: Record<string, string> = {
   restaurant: '식당',
   park: '공원',
   attraction: '볼거리',
+};
+const categoryKinds: Record<string, string> = {
+  cafe: 'coffee',
+  restaurant: 'food',
+  park: 'park',
+  attraction: 'sightseeing',
 };
 const sceneries = {
   water: '물가',
@@ -140,6 +148,7 @@ export default function RunApp() {
   const [form, setForm] = useState<RouteInput>(defaults),
     [result, setResult] = useState<RecommendationResult | null>(null),
     [submitted, setSubmitted] = useState<RouteInput>(defaults);
+  const [originLabel, setOriginLabel] = useState('');
   const [selected, setSelected] = useState(0),
     [busy, setBusy] = useState(false),
     [dirty, setDirty] = useState(false),
@@ -150,6 +159,16 @@ export default function RunApp() {
   const [tab, setTab] = useState('explore'),
     [notice, setNotice] = useState(''),
     [category, setCategory] = useState('all');
+  const [placeQuery, setPlaceQuery] = useState(''),
+    [placeSearchResults, setPlaceSearchResults] = useState<LocalPoi[]>([]),
+    [placeSearchState, setPlaceSearchState] = useState<
+      'idle' | 'loading' | 'kakao' | 'fallback'
+    >('idle');
+  const [originQuery, setOriginQuery] = useState(''),
+    [originSearchResults, setOriginSearchResults] = useState<PlaceCandidate[]>(
+      [],
+    ),
+    [originSearchBusy, setOriginSearchBusy] = useState(false);
   const [records, setRecords] = useState<RunRecord[]>([]),
     [storageError, setStorageError] = useState(''),
     [finish, setFinish] = useState<RunRecord | null>(null),
@@ -252,6 +271,34 @@ export default function RunApp() {
     setDirty(true);
     setNotice('');
   }
+  function selectOrigin(origin: RouteInput['origin'], label: string) {
+    setOriginLabel(label);
+    update({ origin });
+  }
+  function selectOriginPlace(place: PlaceCandidate) {
+    setOriginQuery(place.name);
+    selectOrigin({ lon: place.lon, lat: place.lat }, place.name);
+  }
+  const mergePlaces = useCallback((places: PlaceCandidate[]) => {
+    setGraph((current) =>
+      current
+        ? {
+            ...current,
+            pois: [
+              ...current.pois.filter(
+                (poi) => !places.some((place) => place.id === poi.id),
+              ),
+              ...places.map((place) => ({
+                ...place,
+                osmUrl: place.placeUrl ?? '',
+                openingHours: null,
+                address: place.address ?? null,
+              })),
+            ],
+          }
+        : current,
+    );
+  }, []);
   function calculate() {
     if (!router) return;
     const id = ++computeId.current;
@@ -291,16 +338,23 @@ export default function RunApp() {
       return false;
     }
   }
-  async function locate() {
+  async function locate(openSettings = true) {
     const request = ++computeId.current;
     setLocationBusy(true);
     setNotice('');
     try {
       const p = await currentPosition();
       if (request !== computeId.current) return;
-      update({ origin: { lon: p.coords.longitude, lat: p.coords.latitude } });
-      setNotice('현위치로 설정했어요. 조건을 확인하고 코스를 찾아주세요.');
-      setSheet('settings');
+      selectOrigin(
+        { lon: p.coords.longitude, lat: p.coords.latitude },
+        `현위치 · 오차 약 ${Math.round(p.coords.accuracy)}m`,
+      );
+      setNotice(
+        p.coords.accuracy > 100
+          ? `현위치를 약 ${Math.round(p.coords.accuracy)}m 정확도로 설정했어요. 지도에서 위치를 확인해 주세요.`
+          : '현위치로 설정했어요. 조건을 확인하고 코스를 찾아주세요.',
+      );
+      if (openSettings) setSheet('settings');
     } catch (e) {
       setNotice(
         e instanceof Error
@@ -325,6 +379,7 @@ export default function RunApp() {
   const originPreset = graph?.origins.find(
     (p) => 'nodeId' in form.origin && p.nodeId === form.origin.nodeId,
   );
+  const shownOriginLabel = originPreset?.name || originLabel || '선택한 위치';
   const pois = useMemo(
     () =>
       graph?.pois
@@ -336,6 +391,91 @@ export default function RunApp() {
         .sort((a, b) => a.name.localeCompare(b.name, 'ko')) ?? [],
     [graph, category],
   );
+  const originLon = origin[0];
+  const originLat = origin[1];
+  useEffect(() => {
+    const query = originQuery.trim();
+    if (query.length < 2) return;
+    const abort = new AbortController();
+    const timer = setTimeout(() => {
+      setOriginSearchBusy(true);
+      const params = new URLSearchParams({
+        query,
+        purpose: 'origin',
+        x: String(originLon),
+        y: String(originLat),
+        radius: '20000',
+      });
+      fetch(`/api/places?${params}`, { signal: abort.signal })
+        .then((response) => {
+          if (!response.ok) throw new Error('Origin search failed');
+          return response.json() as Promise<{ places: PlaceCandidate[] }>;
+        })
+        .then(({ places }) => setOriginSearchResults(places))
+        .catch((error: unknown) => {
+          if (!(error instanceof DOMException && error.name === 'AbortError'))
+            setOriginSearchResults([]);
+        })
+        .finally(() => setOriginSearchBusy(false));
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
+  }, [originQuery, originLon, originLat]);
+  useEffect(() => {
+    const query = placeQuery.trim();
+    if (query.length < 2) return;
+    const abort = new AbortController();
+    const timer = setTimeout(() => {
+      setPlaceSearchState('loading');
+      const params = new URLSearchParams({
+        query,
+        x: String(originLon),
+        y: String(originLat),
+        radius: '10000',
+      });
+      if (category !== 'all') params.set('kind', categoryKinds[category]);
+      fetch(`/api/places?${params}`, { signal: abort.signal })
+        .then((response) => {
+          if (!response.ok) throw new Error('Kakao search failed');
+          return response.json() as Promise<{ places: PlaceCandidate[] }>;
+        })
+        .then(({ places }) => {
+          const mapped = places.map((place) => ({
+            ...place,
+            osmUrl: place.placeUrl ?? '',
+            openingHours: null,
+            address: place.address ?? null,
+          }));
+          setPlaceSearchResults(mapped);
+          setPlaceSearchState('kakao');
+          mergePlaces(places);
+        })
+        .catch((error: unknown) => {
+          if (!(error instanceof DOMException && error.name === 'AbortError'))
+            setPlaceSearchState('fallback');
+        });
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
+  }, [placeQuery, category, originLon, originLat, mergePlaces]);
+  const fallbackPois = useMemo(() => {
+    const query = placeQuery.trim().toLocaleLowerCase('ko');
+    return query.length < 2
+      ? []
+      : pois.filter((poi) => poi.name.toLocaleLowerCase('ko').includes(query));
+  }, [placeQuery, pois]);
+  const searchedPois =
+    placeQuery.trim().length < 2
+      ? []
+      : placeSearchState === 'kakao'
+        ? placeSearchResults
+        : placeSearchState === 'fallback'
+          ? fallbackPois
+          : [];
   const route = result?.routes[selected];
   const completed = records.filter((r) => r.completedAt !== null);
   function addPlan(start = false) {
@@ -474,10 +614,13 @@ export default function RunApp() {
               }
             : undefined
         }
-        locate={() => void locate()}
+        locate={() => void locate(false)}
         locationBusy={locationBusy}
         notice={notice || profileError}
         loadError={loadError}
+        onPlaces={mergePlaces}
+        originLabel={originLabel}
+        onOriginLabel={setOriginLabel}
       />
     );
   return (
@@ -531,7 +674,10 @@ export default function RunApp() {
                       selected={selected}
                       picking={picking}
                       onOrigin={(point) => {
-                        update({ origin: { lon: point[0], lat: point[1] } });
+                        selectOrigin(
+                          { lon: point[0], lat: point[1] },
+                          '지도에서 선택한 위치',
+                        );
                         setPicking(false);
                         setSheet('settings');
                       }}
@@ -589,7 +735,7 @@ export default function RunApp() {
                       onClick={() => setSheet('settings')}
                     >
                       <span className="origin-dot" />
-                      {originPreset?.name ?? '선택한 출발점'}
+                      {shownOriginLabel}
                       <ChevronRight size={14} />
                     </button>
                   </div>
@@ -1124,12 +1270,19 @@ export default function RunApp() {
                     <Select
                       value={originPreset?.nodeId ?? 'custom'}
                       onValueChange={(v) => {
-                        if (v && v !== 'custom')
-                          update({ origin: { nodeId: v } });
+                        if (v && v !== 'custom') {
+                          const preset = graph.origins.find(
+                            (item) => item.nodeId === v,
+                          );
+                          selectOrigin(
+                            { nodeId: v },
+                            preset?.name ?? '선택한 출발점',
+                          );
+                        }
                       }}
                     >
                       <SelectTrigger id="origin" className="field-control">
-                        {originPreset?.name ?? '직접 선택한 위치'}
+                        {shownOriginLabel}
                       </SelectTrigger>
                       <SelectContent>
                         {!originPreset && (
@@ -1144,6 +1297,51 @@ export default function RunApp() {
                         ))}
                       </SelectContent>
                     </Select>
+                    <Combobox
+                      items={
+                        originQuery.trim().length < 2 ? [] : originSearchResults
+                      }
+                      itemToStringLabel={(place: PlaceCandidate) => place.name}
+                      isItemEqualToValue={(
+                        a: PlaceCandidate,
+                        b: PlaceCandidate,
+                      ) => a.id === b.id}
+                      onInputValueChange={setOriginQuery}
+                      onValueChange={(place: PlaceCandidate | null) => {
+                        if (place) selectOriginPlace(place);
+                      }}
+                    >
+                      <ComboboxInput
+                        aria-label="출발 장소 검색"
+                        placeholder="카카오맵에서 출발 장소 검색"
+                      />
+                      <ComboboxContent>
+                        <ComboboxEmpty>
+                          {originSearchBusy
+                            ? '카카오맵에서 찾는 중…'
+                            : originQuery.trim().length < 2
+                              ? '장소명을 2글자 이상 입력해 주세요.'
+                              : '검색된 출발 장소가 없어요.'}
+                        </ComboboxEmpty>
+                        <ComboboxList>
+                          {(place: PlaceCandidate) => (
+                            <ComboboxItem
+                              key={place.id}
+                              value={place}
+                              onClick={() => selectOriginPlace(place)}
+                            >
+                              {place.name}
+                              <small className="place-category">카카오맵</small>
+                            </ComboboxItem>
+                          )}
+                        </ComboboxList>
+                      </ComboboxContent>
+                    </Combobox>
+                    {!originPreset && originLabel && (
+                      <p className="form-help selected-origin">
+                        <MapPin size={14} /> 출발점으로 설정됨 · {originLabel}
+                      </p>
+                    )}
                     <div className="form-actions">
                       <Button
                         variant="outline"
@@ -1200,10 +1398,11 @@ export default function RunApp() {
                 )}
               </div>
               <Combobox
-                items={pois}
+                items={searchedPois}
                 value={destination}
                 itemToStringLabel={(p) => p.name}
                 isItemEqualToValue={(a, b) => a.id === b.id}
+                onInputValueChange={setPlaceQuery}
                 onValueChange={(value) => {
                   if (value) update({ destinationId: value.id });
                 }}
@@ -1214,19 +1413,32 @@ export default function RunApp() {
                   className="place-search"
                 />
                 <ComboboxContent>
-                  <ComboboxEmpty>검색된 장소가 없어요.</ComboboxEmpty>
+                  <ComboboxEmpty>
+                    {placeSearchState === 'loading'
+                      ? '카카오맵에서 검색하고 있어요…'
+                      : placeQuery.trim().length < 2
+                        ? '두 글자 이상 입력해 주세요.'
+                        : '검색된 장소가 없어요.'}
+                  </ComboboxEmpty>
                   <ComboboxList>
                     {(p: LocalPoi) => (
                       <ComboboxItem value={p} key={p.id}>
                         {p.name}
                         <small className="place-category">
-                          {categories[p.category]}
+                          {p.source === 'kakao'
+                            ? `카카오맵 · ${categories[p.category]}`
+                            : `저장 장소 · ${categories[p.category]}`}
                         </small>
                       </ComboboxItem>
                     )}
                   </ComboboxList>
                 </ComboboxContent>
               </Combobox>
+              {placeSearchState === 'fallback' && (
+                <p className="form-help">
+                  카카오맵 검색에 연결하지 못해 저장된 장소에서 찾았어요.
+                </p>
+              )}
               {destination?.id === 'way/648051405' && (
                 <figure className="place-photo">
                   <img

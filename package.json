@@ -11,7 +11,7 @@
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",
     "format": "oxfmt",
-    "test": "node --experimental-strip-types tests/routing.ts public/data/gangneung.json && node --experimental-strip-types tests/records.ts && node --experimental-strip-types tests/session.ts && node --experimental-strip-types tests/terrain.ts && node --experimental-strip-types --experimental-test-module-mocks tests/navigation.ts",
+    "test": "node --experimental-strip-types tests/destination-recommender.ts && node --experimental-strip-types tests/routing.ts public/data/gangneung.json && node --experimental-strip-types tests/city-coverage.ts public/data/gangneung.json && node --experimental-strip-types tests/records.ts && node --experimental-strip-types tests/session.ts && node --experimental-strip-types tests/terrain.ts && node --experimental-strip-types --experimental-test-module-mocks tests/navigation.ts",
     "build:mobile": "vite build --config vite.mobile.config.ts",
     "sync:mobile": "npm run build:mobile && cap sync",
     "dev:mobile": "vite --config vite.mobile.config.ts"
