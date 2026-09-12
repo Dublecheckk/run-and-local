@@ -619,7 +619,6 @@ export default function RunSetup({
             adjustment,
             score: place.score * 0.35 + route.score * 0.65,
           });
-          if (verified.length >= 3) break;
         }
       };
       tryConditions();
