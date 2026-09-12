@@ -46,7 +46,9 @@ import { parseProfile, type RunnerProfile } from '@/lib/profile';
 import MapView from './map-view';
 import {
   RUN_KINDS,
+  finalDestinationScore,
   rankDestinations,
+  type DestinationAdjustment,
   type PlaceCandidate,
   type RankedPlace,
   type RunKind,
@@ -56,7 +58,7 @@ type VerifiedPlace = RankedPlace & {
   actualCourseKm: number;
   actualMinutes: number;
   routeScore: number;
-  adjustment?: 'theme' | 'out_and_back';
+  adjustment?: DestinationAdjustment;
 };
 
 export type SetupGraph = GraphData & {
@@ -617,7 +619,7 @@ export default function RunSetup({
             actualMinutes: route.bufferedMinutes,
             routeScore: route.score,
             adjustment,
-            score: place.score * 0.35 + route.score * 0.65,
+            score: finalDestinationScore(place.score, route.score, adjustment),
           });
         }
       };

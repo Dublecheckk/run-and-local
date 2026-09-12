@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  finalDestinationScore,
   rankDestinations,
   type PlaceCandidate,
 } from '../lib/destination-recommender.ts';
@@ -48,4 +49,8 @@ assert(ranked.length === 2);
 assert(ranked.every((p) => p.category === 'cafe'));
 assert.equal(ranked[0].id, 'fit');
 assert(ranked[0].score >= ranked[1].score);
+
+const originalScore = finalDestinationScore(80, 90);
+assert.equal(finalDestinationScore(80, 90, 'theme'), originalScore - 8);
+assert.equal(finalDestinationScore(80, 90, 'out_and_back'), originalScore - 15);
 console.log('Destination recommender checks passed.');
