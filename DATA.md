@@ -35,7 +35,7 @@ python3 running_challenge_20260912/development/data/fetch_osm.py
 
 1. 원본 way의 연속 두 노드만 구간으로 만듭니다. 두 끝점이 bbox 내부인 구간만 포함하며, 거리는 WGS84 좌표로 Haversine 구면거리를 계산합니다. 높이·경사를 반영한 거리가 아닙니다.
 2. motorway·trunk·construction 등은 허용 highway 목록에 없어 제외합니다. `foot`/`access`의 `no`, `private`, `customers`, `permit`, `agricultural`, `forestry`와 `motorroad=yes`, 공사·폐도 태그, 제한 노드를 제외합니다. 일반 자동차 일방통행을 보행에 적용하지 않고 `oneway:foot`만 적용합니다. cycleway는 보행 허가가 명시된 경우만 포함합니다. 제한 상세는 `build_graph.py`와 `metadata.excludedWays`에 남습니다.
-3. access·foot·surface·lit·sidewalk가 없으면 **unknown**입니다. 따라서 포함된 모든 도로가 현장에서 달리기 적합하거나 보행 허가·보도 설치가 검증되었다고 말할 수 없습니다. 특히 주요 도로의 보행 가능 여부는 현장 확인이 필요합니다. 실시간 통제·야간조명·경사·공사·날씨·혼잡도·CCTV·건널목·교통량은 검증하지 않았습니다.
+3. access·foot·surface·lit·sidewalk가 없으면 **unknown**입니다. 따라서 포함된 모든 도로가 현장에서 달리기 적합하거나 보행 허가·보도 설치가 검증되었다고 말할 수 없습니다. 특히 주요 도로의 보행 가능 여부는 현장 확인이 필요합니다. 실시간 통제·야간조명·현장 도로 경사·공사·날씨·혼잡도·CCTV·건널목·교통량은 검증하지 않았습니다.
 4. 풍경은 구간 중점과 실제 OSM 물·해안선·해변·수로 또는 녹지 경계선까지 평면거리가 **150m 이하**인지 추정합니다. 물을 우선하고, 다음으로 녹지, 나머지는 highway 분류에 따라 도심 또는 unknown으로 둡니다. 실제 조망·그늘·환경품질 또는 이용자 평가를 뜻하지 않습니다. 관계형 다중폴리곤은 외곽 member 선을 사용합니다. 물·녹지까지 접근 가능한 보행거리를 뜻하지도 않습니다.
 5. POI는 이름 있는 카페·식당·공원·관광시설과 이름 없는 화장실·음수대를 포함합니다. 원본 점좌표 또는 원본 면 경계의 실제 꼭짓점을 사용합니다. 중심점·입구를 만들어내지 않습니다. 면 POI 좌표는 최대 연결요소와 가장 가까운 경계 꼭짓점이며, `coordinateSource`로 구분됩니다.
 6. POI와 보행망을 잇는 값은 실제좌표 간 직선거리입니다. **100m 이내**인 347개만 추천 후보로 제공하고 1개는 `excluded_pois.json`에 분리합니다. 가까워도 벽·강·횡단로 부재가 있을 수 있어 진입 동선이 검증되었다는 뜻이 아닙니다. `entranceVerified=false`이며 실제 매장 입구까지 턴바이턴 안내하지 않습니다.
@@ -56,3 +56,18 @@ python3 running_challenge_20260912/development/data/fetch_osm.py
 `features[].geometry`는 GeoJSON Polygon 또는 LineString 형식이며 원본 관계형 도형의 member를 그대로 나눈 것이므로 완전한 해안·육지 채움용 데이터는 아닙니다. 경로 선은 `edges`와 `nodes`를 연결하여 그립니다.
 
 태그 해석 출처: [foot](https://wiki.openstreetmap.org/wiki/Key:foot), [oneway:foot](https://wiki.openstreetmap.org/wiki/Key:oneway:foot). 데이터 라이선스 출처: [OpenStreetMap copyright](https://www.openstreetmap.org/copyright).
+
+
+## 지형 보강 (앱 1.1)
+
+배포 자료는 기존 그래프를 보존한 `development/terrain/gangneung_enriched.json`입니다. 원본 Copernicus GLO-30 DSM N37E128 (AWS 2021 배포)의 SHA256·수집 기록·OSM 지형 근거와 재현 스크립트는 `development/terrain/`에 있습니다. 약 30m 픽셀을 3×3 평활화하고 두 정점 사이 거리를 최소 60m로 두어 경사를 추정합니다. 건물·수목을 포함하므로 실제 도로의 순간 최대 경사가 아닙니다. 교량·터널·계단은 미확인으로 둡니다. 경사 추정은 19,727개, 구조물 결측은 229개 구간입니다. 노면은 전체 길이의 약 76.7%가 미확인입니다.
+
+강변·해안·호수는 OSM 도형까지 근접 근거이며 실제 조망/접근 보장이 아닙니다. 흙길·숲길 테마는 `trail` 태그를 사용합니다. 단순 숲 근접 `forest` 태그가 있는 도로를 트레일로 분류하지 않습니다. 산악 등산 난도는 자료가 없어 지원하지 않습니다.
+
+변형 데이터 필수 고지: produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved
+
+[Copernicus DEM 라이선스](https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM) 및 정확한 출처·라이선스 URL은 공개 JSON의 `metadata.terrain.dem`에서 확인할 수 있습니다. OSM 파생 데이터의 ODbL 고지도 유지합니다. 원본 대용량 DEM·개인 설문 원자료·서명 키는 앱에 포함하지 않습니다.
+
+추천은 Dijkstra 경로 탐색, 방향별 일반·테마 웨이포인트 최대 16개, 후보 점수화 및 중복 감점으로 이루어진 규칙 기반 모델입니다. 목표 거리와 최대 거리는 분리하며, 최대 거리에는 지도 연결 직선 간격도 포함합니다. 선택 테마 구간이 전체 코스 길이의 15% 이상인 혼합 코스만 남깁니다. 15%와 가중치는 설계 규칙이며 사용자 효용 검증 결과가 아닙니다. 지형·노면·조명 점수는 전체 코스 중 일치가 확인된 비율을 사용하고, 자료가 전혀 없는 항목은 미확인으로 남겨 점수 가중치를 재정규화합니다.
+
+완만/언덕/오르막은 선호이며 알려진 경사를 반드시 제한하려면 ‘추정 경사 상한’을 별도로 켭니다. 미확인 경사까지 제외하려면 ‘경사 미확인 구간 제외’를 켭니다. 계단·주요 도로 제외도 별도 조건입니다. 고도 추정 상승 100m당 2분은 계획용 여유 가정이며 개인 체력·의학적 예측이 아닙니다. 현재 후보 탐색은 모든 가능한 경로를 탐색하지 않아 조건에 맞는 길이 존재해도 놓칠 수 있습니다.

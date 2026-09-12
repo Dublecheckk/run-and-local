@@ -32,11 +32,9 @@ import {
   MapPin,
   Route as RouteIcon,
   Timer,
-  Waves,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Slider } from '@/components/ui/slider';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import {
   Select,
@@ -73,6 +71,16 @@ import {
   type RunRecord,
 } from '@/lib/records';
 import MapView from './map-view';
+import RouteTerrain from './route-terrain';
+import RunSetup, { RunPreferences, modes } from './run-setup';
+import { COURSE_THEMES } from '@/lib/recommender';
+import {
+  DEFAULT_PROFILE,
+  PROFILE_KEY,
+  saveProfile,
+  parseProfile,
+  type RunnerProfile,
+} from '@/lib/profile';
 
 type LocalPoi = Poi & {
   openingHours?: string | null;
@@ -88,7 +96,11 @@ interface LocalGraph extends GraphData {
     lon: number;
     lat: number;
   }[];
-  metadata: { osmTimestamp: string; attribution: string };
+  metadata: {
+    osmTimestamp: string;
+    attribution: string;
+    terrain?: { dem: { attribution: string; licenseUrl: string } };
+  };
 }
 const categories: Record<string, string> = {
   cafe: '카페',
@@ -96,7 +108,6 @@ const categories: Record<string, string> = {
   park: '공원',
   attraction: '볼거리',
 };
-const modes = { loop: '순환', out_and_back: '왕복', one_way: '편도' };
 const sceneries = {
   water: '물가',
   green: '녹지',
@@ -105,50 +116,23 @@ const sceneries = {
 };
 const defaults: RouteInput = {
   origin: { nodeId: '4655208788' },
-  destinationId: 'way/648051405',
-  minutes: 45,
+  destinationId: '',
+  minutes: 60,
   paceMinKm: 7,
   maxDistanceKm: 6,
   pauseMinutes: 5,
   mode: 'loop',
   scenery: 'water',
+  targetDistanceKm: 5,
+  theme: 'coast',
+  hillPreference: 'gentle',
+  surfacePreference: 'any',
+  avoidSteps: true,
+  avoidMajorRoads: false,
+  requireKnownSlope: false,
+  timeOfDay: 'day',
 };
 const formatKm = (meters: number) => (meters / 1000).toFixed(2);
-function Choice<T extends string>({
-  label,
-  value,
-  items,
-  onChange,
-}: {
-  label: string;
-  value: T;
-  items: Record<T, string>;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <Select
-      value={value}
-      onValueChange={(v) => {
-        if (v) onChange(v as T);
-      }}
-    >
-      <SelectTrigger
-        id={label.replaceAll(' ', '-')}
-        aria-label={label}
-        className="field-control"
-      >
-        {items[value]}
-      </SelectTrigger>
-      <SelectContent>
-        {Object.entries<string>(items).map(([key, text]) => (
-          <SelectItem value={key} key={key}>
-            {text}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
 export default function RunApp() {
   const [graph, setGraph] = useState<LocalGraph | null>(null),
     [loadError, setLoadError] = useState('');
@@ -175,7 +159,37 @@ export default function RunApp() {
   const [session, setSession] = useState<RunSession | null>(null),
     [now, setNow] = useState(0),
     [sessionError, setSessionError] = useState('');
+  const [profile, setProfile] = useState<RunnerProfile | null>(null);
+  const [draftProfile, setDraftProfile] =
+    useState<RunnerProfile>(DEFAULT_PROFILE);
+  const [profileReady, setProfileReady] = useState(false);
+  const [profileError, setProfileError] = useState('');
+  const [setupStep, setSetupStep] = useState<number | null>(0);
   const computeId = useRef(0);
+  useEffect(() => {
+    void Promise.resolve().then(() => {
+      try {
+        const saved = parseProfile(localStorage.getItem(PROFILE_KEY));
+        if (saved) {
+          setProfile(saved);
+          setDraftProfile(saved);
+          setSetupStep(2);
+          setForm((v) => ({
+            ...v,
+            paceMinKm: saved.paceMinKm,
+            hillPreference:
+              saved.experience === 'beginner' ? 'gentle' : 'rolling',
+          }));
+        }
+      } catch (e) {
+        setProfileError(
+          e instanceof Error ? e.message : '기기 프로필을 읽지 못했어요.',
+        );
+      } finally {
+        setProfileReady(true);
+      }
+    });
+  }, []);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -199,7 +213,6 @@ export default function RunApp() {
         if (!Array.isArray(map.origins) || !map.origins.length)
           throw new Error('출발점 데이터가 없습니다.');
         setGraph(map);
-        setResult(createRouter(map).recommend(defaults));
       })
       .catch((e) => {
         if (e.name !== 'AbortError')
@@ -394,6 +407,58 @@ export default function RunApp() {
   }
   const sessionSeconds = session ? Math.floor(elapsed(session, now) / 1000) : 0;
   const timerText = `${String(Math.floor(sessionSeconds / 3600)).padStart(2, '0')}:${String(Math.floor(sessionSeconds / 60) % 60).padStart(2, '0')}:${String(sessionSeconds % 60).padStart(2, '0')}`;
+  function completeSetup() {
+    try {
+      const next = parseProfile(
+        JSON.stringify({ ...draftProfile, paceMinKm: form.paceMinKm }),
+      );
+      if (!next) return;
+      saveProfile(localStorage, next);
+      setProfileError('');
+      setProfile(next);
+      setDraftProfile(next);
+      setSetupStep(null);
+      setTab('explore');
+      setDirty(true);
+      calculate();
+    } catch (e) {
+      setNotice(
+        e instanceof Error ? e.message : '기기 프로필을 저장하지 못했어요.',
+      );
+    }
+  }
+  if (!profileReady)
+    return (
+      <div className="loading-screen">
+        <span className="loading-orbit" />
+        <p>러닝을 준비하고 있어요</p>
+      </div>
+    );
+  if (setupStep !== null && !session)
+    return (
+      <RunSetup
+        key={setupStep}
+        initialStep={setupStep}
+        graph={graph}
+        profile={draftProfile}
+        form={form}
+        update={update}
+        onProfile={setDraftProfile}
+        onComplete={completeSetup}
+        onClose={
+          profile || records.length
+            ? () => {
+                setSetupStep(null);
+                if (!result) setTab('records');
+              }
+            : undefined
+        }
+        locate={() => void locate()}
+        locationBusy={locationBusy}
+        notice={notice || profileError}
+        loadError={loadError}
+      />
+    );
   return (
     <div className="phone-app">
       <header className="app-header">
@@ -502,11 +567,17 @@ export default function RunApp() {
                     <h1>
                       {dirty
                         ? '어떤 길로 달릴까요?'
-                        : submitted.scenery === 'water'
-                          ? '오늘은, 바다 쪽으로.'
-                          : submitted.scenery === 'green'
-                            ? '초록을 따라 달려요.'
-                            : '내 속도로 만나는 동네.'}
+                        : submitted.theme === 'river'
+                          ? '강변을 만나는 러닝.'
+                          : submitted.theme === 'lake'
+                            ? '호수를 만나는 러닝.'
+                            : submitted.theme === 'forest'
+                              ? '흙길을 만나는 러닝.'
+                              : submitted.scenery === 'water'
+                                ? '오늘은, 바다 쪽으로.'
+                                : submitted.scenery === 'green'
+                                  ? '초록을 따라 달려요.'
+                                  : '내 속도로 만나는 동네.'}
                     </h1>
                   </div>
                   <Button
@@ -523,11 +594,17 @@ export default function RunApp() {
                   onClick={() => setSheet('settings')}
                 >
                   <Timer size={15} />
-                  <span>{form.minutes}분</span>
+                  <span>
+                    {form.targetDistanceKm ?? form.maxDistanceKm}km 목표
+                  </span>
                   <i />
                   <span>{modes[form.mode]}</span>
                   <i />
-                  <span>{sceneries[form.scenery]}</span>
+                  <span>
+                    {form.theme
+                      ? COURSE_THEMES[form.theme]
+                      : sceneries[form.scenery]}
+                  </span>
                   <span className="edit-label">변경</span>
                 </button>
                 {dirty ? (
@@ -576,6 +653,12 @@ export default function RunApp() {
                             {Math.ceil(r.bufferedMinutes)}분 ·{' '}
                             {modes[submitted.mode]}
                           </p>
+                          <small className="route-climb">
+                            ↗{' '}
+                            {r.terrain.ascentMeters === null
+                              ? '경사 미확인'
+                              : `추정 ${Math.round(r.terrain.ascentMeters)}m 상승`}
+                          </small>
                         </button>
                       ))}
                     </div>
@@ -583,12 +666,13 @@ export default function RunApp() {
                       <>
                         <div className="course-caption">
                           <span>
-                            <Waves size={15} />
-                            {submitted.scenery === 'water'
-                              ? '물가 근처의 길'
-                              : submitted.scenery === 'green'
-                                ? '녹지 근처의 길'
-                                : '내 조건에 맞춘 길'}
+                            <RouteIcon size={15} />
+                            {submitted.theme
+                              ? COURSE_THEMES[submitted.theme]
+                              : '내 조건에 맞춘 길'}
+                            {submitted.theme &&
+                              submitted.theme !== 'any' &&
+                              ` · 포함 ${Math.round((route.terrain.themeMatchRatio ?? 0) * route.terrain.themeCoverageRatio * 100)}%`}
                           </span>
                           <button onClick={() => setSheet('about')}>
                             추천 이유 <ArrowUpRight size={14} />
@@ -616,6 +700,7 @@ export default function RunApp() {
                             <Bookmark size={21} />
                           </Button>
                         </div>
+                        <RouteTerrain route={route} theme={submitted.theme} />
                         <button
                           className="destination-card"
                           onClick={() => setSheet('place')}
@@ -741,6 +826,22 @@ export default function RunApp() {
           {storageError && <p className="inline-error">{storageError}</p>}
         </TabsContent>
         <TabsContent value="records" className="content-screen">
+          <div className="runner-profile-card">
+            <span>
+              <small>이 기기의 러너</small>
+              <strong>{profile?.nickname || '러너'}님</strong>
+            </span>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDraftProfile(profile ?? DEFAULT_PROFILE);
+                setSetupStep(1);
+              }}
+            >
+              내 정보
+            </Button>
+            <Button onClick={() => setSetupStep(2)}>새 러닝</Button>
+          </div>
           <div className="screen-title">
             <p className="overline">EVERY KILOMETER COUNTS</p>
             <h1>
@@ -984,105 +1085,7 @@ export default function RunApp() {
                       </Button>
                     </div>
                   </div>
-                  <div className="form-field time-setting">
-                    <label>
-                      오늘 쓸 수 있는 시간
-                      <strong>
-                        {form.minutes}
-                        <small>분</small>
-                      </strong>
-                    </label>
-                    <Slider
-                      aria-label="총 러닝 시간"
-                      value={[form.minutes]}
-                      min={15}
-                      max={120}
-                      step={5}
-                      onValueChange={(v) =>
-                        update({ minutes: Array.isArray(v) ? v[0] : v })
-                      }
-                    />
-                    <div>
-                      <span>15분</span>
-                      <span>머무는 시간 포함</span>
-                      <span>120분</span>
-                    </div>
-                  </div>
-                  <div className="form-grid">
-                    <div className="form-field">
-                      <label htmlFor="pace">
-                        페이스 <small>분/km</small>
-                      </label>
-                      <Input
-                        id="pace"
-                        type="number"
-                        inputMode="decimal"
-                        min="3"
-                        max="15"
-                        step=".5"
-                        value={form.paceMinKm}
-                        onChange={(e) =>
-                          update({ paceMinKm: Number(e.target.value) })
-                        }
-                      />
-                    </div>
-                    <div className="form-field">
-                      <label htmlFor="maximum">
-                        최대 거리 <small>km</small>
-                      </label>
-                      <Input
-                        id="maximum"
-                        type="number"
-                        inputMode="decimal"
-                        min=".5"
-                        max="30"
-                        step=".5"
-                        value={form.maxDistanceKm}
-                        onChange={(e) =>
-                          update({ maxDistanceKm: Number(e.target.value) })
-                        }
-                      />
-                    </div>
-                  </div>
-                  <div className="form-grid">
-                    <div className="form-field">
-                      <label htmlFor="코스-형태">코스 형태</label>
-                      <Choice
-                        label="코스 형태"
-                        value={form.mode}
-                        items={modes}
-                        onChange={(mode) => update({ mode })}
-                      />
-                    </div>
-                    <div className="form-field">
-                      <label htmlFor="좋아하는-풍경">좋아하는 풍경</label>
-                      <Choice
-                        label="좋아하는 풍경"
-                        value={form.scenery}
-                        items={sceneries}
-                        onChange={(scenery) => update({ scenery })}
-                      />
-                    </div>
-                  </div>
-                  <div className="pause-setting">
-                    <label htmlFor="pause">목적지에서 머무는 시간</label>
-                    <Input
-                      id="pause"
-                      type="number"
-                      inputMode="numeric"
-                      min="0"
-                      max="90"
-                      step="5"
-                      value={form.pauseMinutes}
-                      onChange={(e) =>
-                        update({ pauseMinutes: Number(e.target.value) })
-                      }
-                    />
-                    <span>분</span>
-                  </div>
-                  <p className="field-help">
-                    순환은 다른 길로, 왕복은 같은 길로 돌아와요.
-                  </p>
+                  <RunPreferences form={form} update={update} />
                   <Button
                     className="primary-action sheet-action"
                     onClick={calculate}
@@ -1213,14 +1216,35 @@ export default function RunApp() {
                 <h2>강릉 시범지역</h2>
                 <p>
                   경포·초당·송정·안목의 실제 지도 구간에서 코스를 계산해요.
-                  경사·조명·공사·현장 통행과 상점 입구는 확인되지 않았어요.
+                  경사는 공개 지표면 고도의 추정값이에요. 실제 도로
+                  경사·공사·현장 통행과 상점 입구는 확인되지 않았어요.
                 </p>
                 <h2>규칙 기반 추천</h2>
                 <p>
-                  시간 40%·풍경 35%·편의시설 15%·도로 유형 10%의 초기 가중치를
-                  사용해요. 정보가 없는 항목은 제외해요. 학습된 선호나 성공
-                  확률이 아니에요.
+                  목표 거리·테마·경사·노면을 경로 탐색과 순위 계산에 반영해요.
+                  선택한 테마 구간이 전체의 15% 이상인 혼합 코스 중 시간·최대
+                  거리·제외 조건을 통과한 후보만 보여드려요. 15%는 서비스 설계
+                  기준이에요. 이용자 데이터로 학습한 모델이나 안전·성공 확률은
+                  아니에요.
                 </p>
+                <h2>고도·경사 데이터</h2>
+                <p>
+                  Copernicus GLO-30 지표면 모델을 평활화하고 60m 이상 간격으로
+                  경사를 추정해요. 수목·건물이 포함되며 실제 도로의 순간 최대
+                  경사는 아니에요. 교량·터널·계단은 경사 미확인으로 남겨요. 상승
+                  100m당 2분의 계획 여유는 설계 가정이에요.
+                </p>
+                {graph?.metadata.terrain && (
+                  <p className="dem-attribution">
+                    <a
+                      href={graph.metadata.terrain.dem.licenseUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {graph.metadata.terrain.dem.attribution}
+                    </a>
+                  </p>
+                )}
                 <h2>내 기록과 개인정보</h2>
                 <p>
                   위치는 현위치 버튼을 누를 때만 요청해요. 저장한 코스에는 출발

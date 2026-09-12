@@ -194,7 +194,7 @@ check(
 );
 check(
   router.recommend({ ...input, origin: { lon: NaN, lat: 37.78 } }).status ===
-    'unsupported_location',
+    'invalid_input',
   'invalid coordinate',
 );
 check(

@@ -2,11 +2,29 @@
 export type Coordinate = [number, number];
 export type Mode = 'one_way' | 'out_and_back' | 'loop';
 export type Scenery = 'water' | 'green' | 'city' | 'any';
+export const COURSE_THEMES = {
+  coast: '바다·해변',
+  river: '강변·하천',
+  lake: '호숫가',
+  forest: '흙길·숲길',
+  road: '도심·도로',
+  any: '상관없음',
+};
+export type CourseTheme = keyof typeof COURSE_THEMES;
+// A transparent product threshold for mixed courses; not a learned effectiveness coefficient.
+export const MIN_THEME_SHARE = 0.15;
+export const HILL_PREFERENCES = {
+  gentle: '완만하게',
+  rolling: '언덕 조금',
+  challenge: '오르막 도전',
+};
+export const HILL_LIMITS = { gentle: 6, rolling: 12, challenge: 20 };
 export type GraphNode = {
   id: string;
   lon: number;
   lat: number;
   crossing?: boolean;
+  elevationMeters?: number | null;
 };
 export type GraphEdge = {
   id: string;
@@ -20,6 +38,14 @@ export type GraphEdge = {
   surface?: string;
   access?: string;
   foot?: string;
+  terrainTags?: string[];
+  gradePercent?: number | null;
+  gradeQuality?: 'dem-estimate' | 'structure-unknown' | 'missing';
+  surfaceClass?: 'paved' | 'unpaved' | 'unknown';
+  lit?: string;
+  steps?: boolean;
+  bridge?: boolean;
+  tunnel?: boolean;
 };
 export type Poi = {
   id: string;
@@ -47,6 +73,15 @@ export type RouteInput = {
   pauseMinutes: number;
   mode: Mode;
   scenery: Scenery;
+  targetDistanceKm?: number;
+  theme?: CourseTheme;
+  hillPreference?: keyof typeof HILL_PREFERENCES;
+  surfacePreference?: 'any' | 'paved' | 'unpaved';
+  avoidSteps?: boolean;
+  avoidMajorRoads?: boolean;
+  requireKnownSlope?: boolean;
+  maxGradePercent?: number;
+  timeOfDay?: 'day' | 'night';
 };
 export type Snap = {
   nodeId: string;
@@ -60,6 +95,32 @@ type Features = {
   scenery: number | null;
   amenities: number | null;
   comfort: number | null;
+  distance: number | null;
+  terrain: number | null;
+  slope: number | null;
+  surface: number | null;
+  lighting: number | null;
+};
+export type TerrainSummary = {
+  ascentMeters: number | null;
+  descentMeters: number | null;
+  maxGradePercent: number | null;
+  averageGradePercent: number | null;
+  gradeCoverageRatio: number;
+  unknownGradeMeters: number;
+  themeCoverageRatio: number;
+  themeMatchRatio: number | null;
+  surfaceCoverageRatio: number;
+  pavedRatio: number;
+  unpavedRatio: number;
+  lightingCoverageRatio: number;
+  litRatio: number;
+  stepsMeters: number;
+  roadTypes: Record<string, number>;
+  elevationProfile: {
+    distanceMeters: number;
+    elevationMeters: number | null;
+  }[];
 };
 export type Route = {
   id: string;
@@ -85,6 +146,8 @@ export type Route = {
   amenitiesCount: number;
   selfOverlapRatio: number;
   overlapWithSelected: number;
+  targetDifferenceMeters: number | null;
+  terrain: TerrainSummary;
 };
 export type RecommendedRoute = Route;
 export type RecommendationResult = {
@@ -97,6 +160,7 @@ export type RecommendationResult = {
     rejectedTime: number;
     rejectedDistance: number;
     rejectedShape: number;
+    rejectedTerrain: number;
     searchedPaths: number;
   };
 };
@@ -107,7 +171,164 @@ const BASE_WEIGHTS = {
   scenery: 0.35,
   amenities: 0.15,
   comfort: 0.1,
+  distance: 0,
+  terrain: 0,
+  slope: 0,
+  surface: 0,
+  lighting: 0,
 };
+const RUNNER_WEIGHTS = {
+  time: 0.05,
+  distance: 0.3,
+  scenery: 0.05,
+  terrain: 0.2,
+  slope: 0.15,
+  surface: 0.1,
+  amenities: 0.05,
+  comfort: 0.05,
+  lighting: 0.05,
+};
+const majorRoads = new Set([
+  'primary',
+  'primary_link',
+  'secondary',
+  'secondary_link',
+]);
+function grade(e: GraphEdge): number | null {
+  return e.gradeQuality === 'dem-estimate' &&
+    typeof e.gradePercent === 'number' &&
+    Number.isFinite(e.gradePercent)
+    ? e.gradePercent
+    : null;
+}
+function matchesTheme(e: GraphEdge, theme: CourseTheme): boolean {
+  return theme === 'forest'
+    ? !!e.terrainTags?.includes('trail')
+    : !!e.terrainTags?.includes(theme);
+}
+function excludedByRunner(e: GraphEdge, input?: RouteInput): boolean {
+  if (!input) return false;
+  const g = grade(e);
+  return !!(
+    (input.avoidSteps && (e.steps || e.highway === 'steps')) ||
+    (input.avoidMajorRoads && majorRoads.has(e.highway ?? '')) ||
+    (input.requireKnownSlope && g === null) ||
+    (input.maxGradePercent !== undefined &&
+      g !== null &&
+      Math.abs(g) > input.maxGradePercent)
+  );
+}
+function runnerPenalty(
+  e: GraphEdge,
+  input?: RouteInput,
+  direction = 1,
+): number {
+  if (!input) return 0;
+  let penalty = 0;
+  if (input.theme && input.theme !== 'any')
+    penalty += matchesTheme(e, input.theme) ? 0 : 1.25;
+  if (input.surfacePreference && input.surfacePreference !== 'any')
+    penalty +=
+      e.surfaceClass === input.surfacePreference
+        ? 0
+        : e.surfaceClass === 'unknown' || !e.surfaceClass
+          ? 0.25
+          : 0.6;
+  const g = grade(e);
+  if (input.hillPreference)
+    penalty +=
+      g === null
+        ? 0.3
+        : input.hillPreference === 'gentle'
+          ? Math.abs(g) / 6
+          : input.hillPreference === 'rolling'
+            ? Math.abs(g) / 24
+            : Math.abs(g * direction - 6) / 30;
+  if (input.timeOfDay === 'night')
+    penalty += e.lit === 'yes' ? 0 : e.lit === 'no' ? 1 : 0.5;
+  return penalty;
+}
+
+export function validateRouteInput(input: RouteInput): string | null {
+  if (!input || typeof input !== 'object') return '러닝 조건을 입력해 주세요.';
+  const limits: [keyof RouteInput, number, number][] = [
+    ['minutes', 5, 240],
+    ['paceMinKm', 3, 15],
+    ['maxDistanceKm', 0.2, 30],
+    ['pauseMinutes', 0, 120],
+  ];
+  for (const [key, min, max] of limits) {
+    const n = input[key];
+    if (typeof n !== 'number' || !Number.isFinite(n) || n < min || n > max)
+      return `${key} 값은 ${min}~${max} 범위여야 해요.`;
+  }
+  if (input.pauseMinutes >= input.minutes)
+    return '머무는 시간은 전체 시간보다 짧아야 해요.';
+  if (
+    !['one_way', 'out_and_back', 'loop'].includes(input.mode) ||
+    !['water', 'green', 'city', 'any'].includes(input.scenery)
+  )
+    return '코스 형태와 풍경을 확인해 주세요.';
+  if (
+    !input.origin ||
+    typeof input.origin !== 'object' ||
+    typeof input.destinationId !== 'string' ||
+    !input.destinationId
+  )
+    return '출발지와 목적지를 선택해 주세요.';
+  if (
+    'nodeId' in input.origin
+      ? typeof input.origin.nodeId !== 'string' || !input.origin.nodeId
+      : ![input.origin.lon, input.origin.lat].every(Number.isFinite) ||
+        Math.abs(input.origin.lon) > 180 ||
+        Math.abs(input.origin.lat) > 90
+  )
+    return '출발 위치가 올바르지 않아요.';
+  if (
+    input.targetDistanceKm !== undefined &&
+    (!Number.isFinite(input.targetDistanceKm) ||
+      input.targetDistanceKm < 0.2 ||
+      input.targetDistanceKm > 30)
+  )
+    return '목표 거리는 0.2~30km로 입력해 주세요.';
+  if (
+    input.targetDistanceKm !== undefined &&
+    input.targetDistanceKm > input.maxDistanceKm
+  )
+    return '최대 거리는 목표 거리보다 작을 수 없어요.';
+  if (
+    input.maxGradePercent !== undefined &&
+    (!Number.isFinite(input.maxGradePercent) ||
+      input.maxGradePercent < 1 ||
+      input.maxGradePercent > 40)
+  )
+    return '추정 경사 상한은 1~40%로 입력해 주세요.';
+  if (input.theme !== undefined && !Object.hasOwn(COURSE_THEMES, input.theme))
+    return '코스 테마를 선택해 주세요.';
+  if (
+    input.hillPreference !== undefined &&
+    !Object.hasOwn(HILL_LIMITS, input.hillPreference)
+  )
+    return '오르막 조건을 선택해 주세요.';
+  if (
+    input.surfacePreference !== undefined &&
+    !['any', 'paved', 'unpaved'].includes(input.surfacePreference)
+  )
+    return '노면 선호를 선택해 주세요.';
+  if (
+    input.timeOfDay !== undefined &&
+    !['day', 'night'].includes(input.timeOfDay)
+  )
+    return '낮 또는 야간을 선택해 주세요.';
+  for (const key of [
+    'avoidSteps',
+    'avoidMajorRoads',
+    'requireKnownSlope',
+  ] as const)
+    if (input[key] !== undefined && typeof input[key] !== 'boolean')
+      return '제외 조건이 올바르지 않아요.';
+  return null;
+}
 const MAX_ORIGIN_GAP = 150,
   MAX_DESTINATION_GAP = 100;
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
@@ -195,6 +416,9 @@ export function createRouter(data: GraphData) {
       typeof node.id !== 'string' ||
       !Number.isFinite(node.lon) ||
       !Number.isFinite(node.lat) ||
+      (node.elevationMeters != null &&
+        (typeof node.elevationMeters !== 'number' ||
+          !Number.isFinite(node.elevationMeters))) ||
       Math.abs(node.lon) > 180 ||
       Math.abs(node.lat) > 90 ||
       index.has(node.id)
@@ -218,6 +442,33 @@ export function createRouter(data: GraphData) {
       !Number.isFinite(e.distanceMeters) ||
       e.distanceMeters <= 0 ||
       typeof e.bidirectional !== 'boolean' ||
+      (e.gradePercent != null &&
+        (typeof e.gradePercent !== 'number' ||
+          !Number.isFinite(e.gradePercent) ||
+          Math.abs(e.gradePercent) > 1000)) ||
+      (e.gradeQuality !== undefined &&
+        !['dem-estimate', 'structure-unknown', 'missing'].includes(
+          e.gradeQuality,
+        )) ||
+      (e.surfaceClass !== undefined &&
+        !['paved', 'unpaved', 'unknown'].includes(e.surfaceClass)) ||
+      (e.terrainTags !== undefined &&
+        (!Array.isArray(e.terrainTags) ||
+          e.terrainTags.some(
+            (t) =>
+              ![
+                'coast',
+                'river',
+                'lake',
+                'green',
+                'forest',
+                'trail',
+                'road',
+              ].includes(t),
+          ))) ||
+      (['steps', 'bridge', 'tunnel'] as const).some(
+        (k) => e[k] !== undefined && typeof e[k] !== 'boolean',
+      ) ||
       (e.crossings !== undefined &&
         (!Number.isFinite(e.crossings) || e.crossings < 0))
     )
@@ -289,6 +540,7 @@ export function createRouter(data: GraphData) {
       penalty?: Map<number, number>;
       scenery?: Scenery;
       max?: number;
+      input?: RouteInput;
     } = {},
   ) {
     const dist = new Float64Array(nodes.length).fill(Infinity),
@@ -330,6 +582,7 @@ export function createRouter(data: GraphData) {
         if (options.banned?.has(arc.edge)) continue;
         const next = options.backwards ? arc.from : arc.to,
           e = edges[arc.edge];
+        if (excludedByRunner(e, options.input)) continue;
         const preferred =
           options.scenery &&
           options.scenery !== 'any' &&
@@ -338,6 +591,13 @@ export function createRouter(data: GraphData) {
           e.distanceMeters *
           (1 +
             (options.penalty?.get(arc.edge) ?? 0) +
+            (options.scenery
+              ? runnerPenalty(
+                  e,
+                  options.input,
+                  nodes[arc.from].id === e.from ? 1 : -1,
+                )
+              : 0) +
             (preferred
               ? 0
               : options.scenery && options.scenery !== 'any'
@@ -401,12 +661,103 @@ export function createRouter(data: GraphData) {
     return union ? intersection / union : 0;
   }
   const edgeIndex = new Map(edges.map((e, i) => [e.id, i]));
+  function describeTerrain(
+    path: Path,
+    sequence: number[],
+    input: RouteInput,
+    metres: number,
+  ): TerrainSummary {
+    let knownGrade = 0,
+      ascent = 0,
+      descent = 0,
+      maxGrade = 0,
+      gradeSum = 0,
+      themeKnown = 0,
+      themeMatch = 0,
+      paved = 0,
+      unpaved = 0,
+      lightingKnown = 0,
+      lit = 0,
+      steps = 0;
+    const roadTypes: Record<string, number> = {};
+    let cumulative = 0;
+    const elevationProfile = [
+      {
+        distanceMeters: 0,
+        elevationMeters: nodes[sequence[0]].elevationMeters ?? null,
+      },
+    ];
+    for (const arc of path) {
+      const e = edges[arc.edge],
+        d = e.distanceMeters,
+        g = grade(e);
+      if (g !== null) {
+        knownGrade += d;
+        gradeSum += Math.abs(g) * d;
+        maxGrade = Math.max(maxGrade, Math.abs(g));
+        const change = (g / 100) * d * (nodes[arc.from].id === e.from ? 1 : -1);
+        ascent += Math.max(0, change);
+        descent += Math.max(0, -change);
+      }
+      if (e.terrainTags?.length) {
+        themeKnown += d;
+        if (input.theme && matchesTheme(e, input.theme)) themeMatch += d;
+      }
+      if (e.surfaceClass === 'paved') paved += d;
+      if (e.surfaceClass === 'unpaved') unpaved += d;
+      if (e.lit === 'yes' || e.lit === 'no') lightingKnown += d;
+      if (e.lit === 'yes') lit += d;
+      if (e.steps || e.highway === 'steps') steps += d;
+      const kind =
+        e.steps || e.highway === 'steps'
+          ? '계단'
+          : e.terrainTags?.includes('trail')
+            ? '흙길·샛길'
+            : ['footway', 'pedestrian', 'path'].includes(e.highway ?? '')
+              ? '보행로'
+              : e.highway === 'cycleway'
+                ? '자전거길'
+                : '도로';
+      roadTypes[kind] = (roadTypes[kind] ?? 0) + d;
+      cumulative += d;
+      elevationProfile.push({
+        distanceMeters: cumulative,
+        elevationMeters: nodes[arc.to].elevationMeters ?? null,
+      });
+    }
+    // Keep the native chart light; every edge still contributes to the metrics above.
+    const sampled = elevationProfile.filter(
+      (_, i) =>
+        i === 0 ||
+        i === elevationProfile.length - 1 ||
+        i % Math.max(1, Math.ceil(elevationProfile.length / 100)) === 0,
+    );
+    return {
+      ascentMeters: knownGrade ? ascent : null,
+      descentMeters: knownGrade ? descent : null,
+      maxGradePercent: knownGrade ? maxGrade : null,
+      averageGradePercent: knownGrade ? gradeSum / knownGrade : null,
+      gradeCoverageRatio: knownGrade / metres,
+      unknownGradeMeters: metres - knownGrade,
+      themeCoverageRatio: themeKnown / metres,
+      themeMatchRatio: themeKnown ? themeMatch / themeKnown : null,
+      surfaceCoverageRatio: (paved + unpaved) / metres,
+      pavedRatio: paved / metres,
+      unpavedRatio: unpaved / metres,
+      lightingCoverageRatio: lightingKnown / metres,
+      litRatio: lit / metres,
+      stepsMeters: steps,
+      roadTypes,
+      elevationProfile: sampled,
+    };
+  }
   function recommend(input: RouteInput): RecommendationResult {
     const diagnostics = {
       generated: 0,
       rejectedTime: 0,
       rejectedDistance: 0,
       rejectedShape: 0,
+      rejectedTerrain: 0,
       searchedPaths: 0,
     };
     const result: RecommendationResult = {
@@ -417,38 +768,8 @@ export function createRouter(data: GraphData) {
       diagnostics,
     };
     const invalid = (message: string) => ({ ...result, message });
-    if (!input || typeof input !== 'object')
-      return invalid('러닝 조건을 입력해 주세요.');
-    const limits: [keyof RouteInput, number, number][] = [
-      ['minutes', 5, 240],
-      ['paceMinKm', 3, 15],
-      ['maxDistanceKm', 0.2, 30],
-      ['pauseMinutes', 0, 120],
-    ];
-    for (const [key, minimum, maximum] of limits) {
-      const value = input[key];
-      if (
-        typeof value !== 'number' ||
-        !Number.isFinite(value) ||
-        value < minimum ||
-        value > maximum
-      )
-        return invalid(
-          `${key} 값은 ${minimum}~${maximum} 범위의 숫자여야 합니다.`,
-        );
-    }
-    if (input.pauseMinutes >= input.minutes)
-      return invalid('머무는 시간은 전체 시간보다 짧아야 합니다.');
-    if (!['one_way', 'out_and_back', 'loop'].includes(input.mode))
-      return invalid('경로 유형을 선택해 주세요.');
-    if (!['water', 'green', 'city', 'any'].includes(input.scenery))
-      return invalid('풍경 취향을 선택해 주세요.');
-    if (
-      !input.origin ||
-      typeof input.origin !== 'object' ||
-      typeof input.destinationId !== 'string'
-    )
-      return invalid('출발지와 목적지를 선택해 주세요.');
+    const error = validateRouteInput(input);
+    if (error) return invalid(error);
     let origin: Snap | null = null;
     if ('nodeId' in input.origin) {
       const i = index.get(input.origin.nodeId);
@@ -492,7 +813,7 @@ export function createRouter(data: GraphData) {
       factor * (origin.distanceMeters + destination.distanceMeters);
     const connectorAllowance = (connectorDistance / 1000) * 10;
     const routeBudget = Math.min(
-      input.maxDistanceKm * 1000,
+      Math.max(0, input.maxDistanceKm * 1000 - connectorDistance),
       (Math.max(0, input.minutes - input.pauseMinutes - connectorAllowance) /
         (input.paceMinKm * 1.1)) *
         1000,
@@ -505,9 +826,17 @@ export function createRouter(data: GraphData) {
       options: Parameters<typeof search>[2] = {},
     ) => {
       diagnostics.searchedPaths++;
-      return search(s, t, options);
+      return search(s, t, { ...options, input });
     };
+    // These unweighted trees measure metres for feasibility, not user preference costs.
     const originTree = dijkstra(start, null, { max: legBudget });
+    const preferredOriginTree =
+      input.theme !== undefined ||
+      input.hillPreference !== undefined ||
+      input.surfacePreference !== undefined ||
+      input.timeOfDay !== undefined
+        ? dijkstra(start, null, { scenery: input.scenery, max: legBudget * 12 })
+        : originTree;
     const destinationTree = dijkstra(end, null, {
       backwards: true,
       max: legBudget,
@@ -534,7 +863,7 @@ export function createRouter(data: GraphData) {
       const tree = dijkstra(start, end, {
         scenery: input.scenery,
         penalty,
-        max: legBudget * 4,
+        max: legBudget * 12,
       });
       const path = trace(tree.prev, start, end);
       addOutbound(path);
@@ -542,12 +871,26 @@ export function createRouter(data: GraphData) {
       for (const arc of path)
         penalty.set(arc.edge, (penalty.get(arc.edge) ?? 0) + 0.8);
     }
-    // ponytail: eight spatially spread waypoints give bounded search, not an exhaustive optimum.
+    // ponytail: at most 16 spatial/theme waypoints bound latency; wider search can improve recall.
     const waypointBuckets = new Map<
       number,
       { i: number; difference: number }
     >();
-    const ideal = input.mode === 'loop' ? routeBudget * 0.52 : legBudget * 0.92;
+    const ideal =
+      input.targetDistanceKm !== undefined
+        ? Math.min(
+            legBudget,
+            input.targetDistanceKm *
+              1000 *
+              (input.mode === 'loop'
+                ? 0.52
+                : input.mode === 'out_and_back'
+                  ? 0.5
+                  : 1),
+          )
+        : input.mode === 'loop'
+          ? routeBudget * 0.52
+          : legBudget * 0.92;
     for (let i = 0; i < nodes.length; i++) {
       if (i === start || i === end || adjacency[i].length < 2) continue;
       const total = originTree.dist[i] + destinationTree.dist[i];
@@ -569,16 +912,33 @@ export function createRouter(data: GraphData) {
       const difference = Math.abs(total - ideal);
       if (difference < (waypointBuckets.get(bucket)?.difference ?? Infinity))
         waypointBuckets.set(bucket, { i, difference });
+      if (
+        input.theme &&
+        input.theme !== 'any' &&
+        adjacency[i].some((a) => matchesTheme(edges[a.edge], input.theme!))
+      ) {
+        const themedBucket = bucket + 8;
+        if (
+          difference <
+          (waypointBuckets.get(themedBucket)?.difference ?? Infinity)
+        )
+          waypointBuckets.set(themedBucket, { i, difference });
+      }
     }
     for (const { i } of [...waypointBuckets.values()].sort(
       (a, b) => a.difference - b.difference,
     )) {
-      const head = trace(originTree.prev, start, i);
+      const preferredHead = trace(preferredOriginTree.prev, start, i);
+      const head =
+        preferredHead &&
+        length(preferredHead) + destinationTree.dist[i] <= legBudget
+          ? preferredHead
+          : trace(originTree.prev, start, i);
       if (!head) continue;
       const tailTree = dijkstra(i, end, {
         banned: new Set(head.map((a) => a.edge)),
         scenery: input.scenery,
-        max: legBudget - length(head),
+        max: (legBudget - length(head)) * 12,
       });
       const tail = trace(tailTree.prev, i, end);
       if (tail) addOutbound([...head, ...tail]);
@@ -605,7 +965,7 @@ export function createRouter(data: GraphData) {
           const tree = dijkstra(end, start, {
             penalty: used,
             scenery: input.scenery,
-            max: routeBudget * (avoidance + 1),
+            max: routeBudget * (avoidance + 8),
           });
           const back = trace(tree.prev, end, start);
           if (back) candidates.push([...path, ...back]);
@@ -635,11 +995,26 @@ export function createRouter(data: GraphData) {
         diagnostics.rejectedShape++;
         continue;
       }
-      if (metres > input.maxDistanceKm * 1000 + 1e-6) {
+      if (metres + connectorDistance > input.maxDistanceKm * 1000 + 1e-6) {
         diagnostics.rejectedDistance++;
         continue;
       }
-      const running = (metres / 1000) * input.paceMinKm;
+      const terrain = describeTerrain(path, sequence, input, metres);
+      const themeShare =
+        (terrain.themeMatchRatio ?? 0) * terrain.themeCoverageRatio;
+      if (
+        input.theme &&
+        input.theme !== 'any' &&
+        themeShare + 1e-9 < MIN_THEME_SHARE
+      ) {
+        diagnostics.rejectedTerrain++;
+        continue;
+      }
+      // ponytail: ascent allowance is a declared planning heuristic, not a personalized physiological model.
+      const uphillMinutes = input.hillPreference
+        ? ((terrain.ascentMeters ?? 0) / 100) * 2
+        : 0;
+      const running = (metres / 1000) * input.paceMinKm + uphillMinutes;
       let crossingEvents = 0;
       for (const a of path)
         crossingEvents +=
@@ -686,25 +1061,64 @@ export function createRouter(data: GraphData) {
             (input.minutes - input.pauseMinutes),
         ),
         scenery:
-          input.scenery === 'any' || !sceneryKnown
+          (input.theme && input.theme !== 'any') ||
+          input.scenery === 'any' ||
+          !sceneryKnown
             ? null
             : sceneryMatch / sceneryKnown,
         amenities: nearbyAmenities.length
           ? Math.min(1, nearbyAmenities.length / 3)
           : null,
         comfort: comfortKnown ? comfortSum / comfortKnown : null,
+        distance:
+          input.targetDistanceKm !== undefined
+            ? clamp(
+                1 -
+                  Math.abs(metres - input.targetDistanceKm * 1000) /
+                    (input.targetDistanceKm * 1000),
+              )
+            : null,
+        terrain: input.theme && input.theme !== 'any' ? themeShare : null,
+        slope:
+          input.hillPreference && terrain.averageGradePercent !== null
+            ? input.hillPreference === 'challenge'
+              ? clamp((terrain.ascentMeters ?? 0) / (metres * 0.03))
+              : clamp(
+                  1 -
+                    terrain.averageGradePercent /
+                      HILL_LIMITS[input.hillPreference],
+                )
+            : null,
+        surface:
+          input.surfacePreference &&
+          input.surfacePreference !== 'any' &&
+          terrain.surfaceCoverageRatio > 0
+            ? input.surfacePreference === 'paved'
+              ? terrain.pavedRatio
+              : terrain.unpavedRatio
+            : null,
+        lighting:
+          input.timeOfDay === 'night' && terrain.lightingCoverageRatio > 0
+            ? terrain.litRatio
+            : null,
       };
-      const weightSum = (
-        Object.keys(BASE_WEIGHTS) as (keyof Features)[]
-      ).reduce(
+      const baseWeights =
+        input.targetDistanceKm !== undefined ||
+        input.theme !== undefined ||
+        input.hillPreference !== undefined ||
+        input.surfacePreference !== undefined ||
+        input.timeOfDay === 'night'
+          ? RUNNER_WEIGHTS
+          : BASE_WEIGHTS;
+      const weightSum = (Object.keys(baseWeights) as (keyof Features)[]).reduce(
         (sum, feature) =>
-          sum + (features[feature] === null ? 0 : BASE_WEIGHTS[feature]),
+          sum + (features[feature] === null ? 0 : baseWeights[feature]),
         0,
       );
       const weights = Object.fromEntries(
-        (Object.keys(BASE_WEIGHTS) as (keyof Features)[]).map((feature) => [
+        (Object.keys(baseWeights) as (keyof Features)[]).map((feature) => [
           feature,
-          features[feature] === null ? 0 : BASE_WEIGHTS[feature] / weightSum,
+          features[feature] === null ? 0 : baseWeights[feature] / weightSum,
         ]),
       ) as Record<keyof Features, number>;
       const score =
@@ -721,13 +1135,37 @@ export function createRouter(data: GraphData) {
         reasons.push(
           `풍경이 분류된 구간 ${((100 * sceneryKnown) / metres).toFixed(0)}% 중 취향 일치 ${(100 * features.scenery).toFixed(0)}% · 지도 근접 추정`,
         );
+      if (input.targetDistanceKm !== undefined)
+        reasons.push(
+          `목표 ${input.targetDistanceKm}km 대비 ${((metres - input.targetDistanceKm * 1000) / 1000).toFixed(2)}km · 최대 ${input.maxDistanceKm}km 이내`,
+        );
+      if (input.theme && input.theme !== 'any')
+        reasons.push(
+          `${COURSE_THEMES[input.theme]} 지도 근거가 있는 구간 ${Math.round((terrain.themeMatchRatio ?? 0) * terrain.themeCoverageRatio * 100)}% · 테마가 코스 전체에 이어진다는 뜻은 아님`,
+        );
+      if (terrain.maxGradePercent !== null)
+        reasons.push(
+          `주변 지형 추정 경사 최대 ${terrain.maxGradePercent.toFixed(1)}% · 상승 약 ${terrain.ascentMeters?.toFixed(0)}m · 경사 추정 구간 ${Math.round(terrain.gradeCoverageRatio * 100)}%`,
+        );
+      if (terrain.unknownGradeMeters > 0.1)
+        reasons.push(
+          `교량·터널 등 경사 미확인 ${Math.round(terrain.unknownGradeMeters)}m 포함`,
+        );
+      if (input.timeOfDay === 'night')
+        reasons.push(
+          `야간 조명 등록 구간 ${Math.round(terrain.lightingCoverageRatio * 100)}% · 미확인 구간은 밝거나 안전한 길로 확인된 것이 아님`,
+        );
+      if (input.surfacePreference && input.surfacePreference !== 'any')
+        reasons.push(
+          `노면 등록 구간 ${Math.round(terrain.surfaceCoverageRatio * 100)}% · 미확인 노면은 선호 충족으로 계산하지 않음`,
+        );
       if (nearbyAmenities.length)
         reasons.push(
           `경로 정점 60m 내 지도에 등록된 화장실·음수대 ${nearbyAmenities.length}곳 · 입구 연결 미확인`,
         );
       if (features.comfort !== null)
         reasons.push(
-          '편안함은 도로 종류·표면 태그 기반 추정이며 경사·조명·혼잡은 반영하지 않음',
+          '도로·노면은 OSM 등록 정보이며 실시간 혼잡과 현장 통행은 미확인',
         );
       if (connectorDistance > 1)
         reasons.push(
@@ -761,6 +1199,11 @@ export function createRouter(data: GraphData) {
         amenitiesCount: nearbyAmenities.length,
         selfOverlapRatio: overlap,
         overlapWithSelected: 0,
+        targetDifferenceMeters:
+          input.targetDistanceKm !== undefined
+            ? metres - input.targetDistanceKm * 1000
+            : null,
+        terrain,
       });
     }
     while (ranked.length && result.routes.length < 3) {
@@ -781,11 +1224,17 @@ export function createRouter(data: GraphData) {
     result.status = result.routes.length ? 'ok' : 'no_route';
     result.message = result.routes.length
       ? ''
-      : input.mode === 'loop'
-        ? '목적지를 지나 출발점으로 돌아오며 중복 구간이 25% 이하인 순환 경로를 현재 조건에서 찾지 못했습니다. 왕복으로 바꾸거나 시간을 늘려 주세요.'
-        : input.mode === 'out_and_back'
-          ? '동일 경로로 되돌아올 수 있고 시간·거리를 만족하는 왕복 경로를 찾지 못했습니다.'
-          : '현재 시간·거리 조건을 만족하는 연결 경로를 찾지 못했습니다. 시간을 늘리거나 가까운 목적지를 선택해 주세요.';
+      : (input.theme && input.theme !== 'any') ||
+          input.maxGradePercent !== undefined ||
+          input.requireKnownSlope ||
+          input.avoidSteps ||
+          input.avoidMajorRoads
+        ? '목적지·시간·최대거리·선택 테마 15% 이상·제외 조건을 함께 만족하는 코스를 찾지 못했어요. 가까운 목적지나 왕복을 선택하거나 조건을 직접 조정해 주세요. 조건을 임의로 완화하지 않았어요.'
+        : input.mode === 'loop'
+          ? '목적지를 지나 출발점으로 돌아오며 중복 구간이 25% 이하인 순환 경로를 현재 조건에서 찾지 못했습니다. 왕복으로 바꾸거나 시간을 늘려 주세요.'
+          : input.mode === 'out_and_back'
+            ? '동일 경로로 되돌아올 수 있고 시간·거리를 만족하는 왕복 경로를 찾지 못했습니다.'
+            : '현재 시간·거리 조건을 만족하는 연결 경로를 찾지 못했습니다. 시간을 늘리거나 가까운 목적지를 선택해 주세요.';
     return result;
   }
   return { recommend, snap };
