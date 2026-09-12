@@ -11,7 +11,7 @@
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",
     "format": "oxfmt",
-    "test": "node --experimental-strip-types tests/routing.ts public/data/gangneung.json && node --experimental-strip-types tests/records.ts && node --experimental-strip-types tests/session.ts && node --experimental-strip-types tests/terrain.ts",
+    "test": "node --experimental-strip-types tests/routing.ts public/data/gangneung.json && node --experimental-strip-types tests/records.ts && node --experimental-strip-types tests/session.ts && node --experimental-strip-types tests/terrain.ts && node --experimental-strip-types --experimental-test-module-mocks tests/navigation.ts",
     "build:mobile": "vite build --config vite.mobile.config.ts",
     "sync:mobile": "npm run build:mobile && cap sync",
     "dev:mobile": "vite --config vite.mobile.config.ts"
@@ -19,6 +19,7 @@
   "dependencies": {
     "@base-ui/react": "1.7.0",
     "@capacitor/android": "^8.5.2",
+    "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.2",
     "@capacitor/filesystem": "^8.1.3",
     "@capacitor/geolocation": "^8.2.2",

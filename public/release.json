@@ -1,11 +1,11 @@
 {
-  "version": "1.1",
+  "version": "1.2",
   "platform": "android",
   "applicationId": "app.runandlocal.mobile",
   "minSdk": 24,
   "apk": "/downloads/run-and-local.apk",
-  "sizeBytes": 6024709,
-  "sha256": "16de38c7bd3ac893a51e0a1f15e74e6bedb650d62e9eb2ed2306e8f3e9bd628d",
+  "sizeBytes": 6032983,
+  "sha256": "9168b8cce5d04cf6365bd6b5d22e444411541c684cba3e82cfa2cf28a8d9af98",
   "distribution": "signed-release-apk",
   "storePublished": false
 }

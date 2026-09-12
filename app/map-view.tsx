@@ -2,13 +2,25 @@
 import { useEffect, useRef, useState } from 'react';
 import type * as Leaflet from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import type { Coordinate, GraphData, Poi, Route } from '@/lib/recommender';
+import {
+  type Coordinate,
+  type GraphData,
+  type Poi,
+  type Route,
+} from '@/lib/recommender';
+import { courseDirections, type MapPosition } from '@/lib/navigation';
 
 type Props = {
   graph: GraphData;
   origin: Coordinate;
   destination: Poi | null;
-  routes: Route[];
+  routes: Pick<Route, 'geometry'>[];
+  navigation?: boolean;
+  directionUntil?: number;
+  location?: MapPosition | null;
+  follow?: boolean;
+  overviewRequest?: number;
+  onPan?: () => void;
   selected: number;
   picking: boolean;
   onOrigin: (point: Coordinate) => void;
@@ -18,7 +30,9 @@ export default function MapView(props: Props) {
   const element = useRef<HTMLDivElement>(null),
     map = useRef<Leaflet.Map | null>(null),
     layer = useRef<Leaflet.LayerGroup | null>(null),
-    api = useRef<typeof Leaflet | null>(null);
+    api = useRef<typeof Leaflet | null>(null),
+    locationLayer = useRef<Leaflet.LayerGroup | null>(null);
+  const movingMap = useRef(false);
   const current = useRef(props);
   useEffect(() => {
     current.current = props;
@@ -67,6 +81,10 @@ export default function MapView(props: Props) {
           { color: '#789276', weight: 1, opacity: 0.1, interactive: false },
         ).addTo(m);
         layer.current = L.layerGroup().addTo(m);
+        locationLayer.current = L.layerGroup().addTo(m);
+        m.on('dragstart zoomstart', () => {
+          if (!movingMap.current) current.current.onPan?.();
+        });
         m.on('click', (e) => {
           if (current.current.picking)
             current.current.onOrigin([e.latlng.lng, e.latlng.lat]);
@@ -112,6 +130,22 @@ export default function MapView(props: Props) {
       })
         .on('click', () => current.current.onSelect(i))
         .addTo(group);
+      if (active && props.navigation) {
+        for (const { point, bearing } of courseDirections(
+          route.geometry,
+          props.directionUntil,
+        )) {
+          L.marker(latLng(point), {
+            interactive: false,
+            icon: L.divIcon({
+              className: 'course-direction',
+              html: `<svg viewBox="0 0 20 20" style="transform:rotate(${bearing}deg)" aria-hidden="true"><path d="M4 13 L10 7 L16 13"/></svg>`,
+              iconSize: [20, 20],
+              iconAnchor: [10, 10],
+            }),
+          }).addTo(group);
+        }
+      }
     }
     const marker = (point: Coordinate, label: string) =>
       L.marker(latLng(point), {
@@ -139,16 +173,69 @@ export default function MapView(props: Props) {
               ]
             : []),
         ];
-    if (bounds.length)
-      m.fitBounds(L.latLngBounds(bounds), {
-        paddingTopLeft: [40, 100],
-        paddingBottomRight: [65, 75],
-        maxZoom: 16,
-        animate: false,
-      });
-  }, [props.routes, props.selected, props.origin, props.destination, ready]);
+    if (bounds.length) {
+      movingMap.current = true;
+      try {
+        m.fitBounds(L.latLngBounds(bounds), {
+          paddingTopLeft: props.navigation ? [35, 55] : [40, 100],
+          paddingBottomRight: props.navigation ? [60, 80] : [65, 75],
+          maxZoom: 16,
+          animate: false,
+        });
+      } finally {
+        movingMap.current = false;
+      }
+    }
+  }, [
+    props.routes,
+    props.selected,
+    props.origin,
+    props.destination,
+    props.navigation,
+    props.directionUntil,
+    props.overviewRequest,
+    ready,
+  ]);
+  useEffect(() => {
+    const L = api.current,
+      m = map.current,
+      group = locationLayer.current;
+    if (!ready || !L || !m || !group) return;
+    group.clearLayers();
+    if (!props.location) return;
+    const { point, accuracy } = props.location,
+      center: Leaflet.LatLngTuple = [point[1], point[0]];
+    L.circle(center, {
+      radius: accuracy,
+      color: '#3675da',
+      weight: 1,
+      fillOpacity: 0.12,
+      interactive: false,
+    }).addTo(group);
+    L.marker(center, {
+      interactive: false,
+      zIndexOffset: 1000,
+      icon: L.divIcon({
+        className: 'live-location-marker',
+        html: '<span></span>',
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
+      }),
+    }).addTo(group);
+    if (props.follow) {
+      movingMap.current = true;
+      try {
+        if (m.getZoom() < 16) m.setView(center, 17, { animate: false });
+        else m.panTo(center, { animate: false });
+      } finally {
+        movingMap.current = false;
+      }
+    }
+  }, [props.location, props.follow, ready]);
   return (
-    <div className={`map-surface ${props.picking ? 'picking' : ''}`}>
+    <div
+      className={`map-surface ${props.picking ? 'picking' : ''} ${props.navigation ? 'navigation-map' : ''}`}
+    >
       <div
         className="map-canvas"
         ref={element}

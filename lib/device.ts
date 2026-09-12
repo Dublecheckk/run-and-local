@@ -1,6 +1,6 @@
 import { Capacitor } from '@capacitor/core';
-import { Geolocation } from '@capacitor/geolocation';
-export async function currentPosition() {
+import { Geolocation, type Position } from '@capacitor/geolocation';
+async function requestLocationAccuracy() {
   let precise = true;
   if (Capacitor.isNativePlatform()) {
     const permission = await Geolocation.requestPermissions({
@@ -15,8 +15,11 @@ export async function currentPosition() {
       );
     precise = permission.location === 'granted';
   }
+  return precise;
+}
+export async function currentPosition() {
   const position = await Geolocation.getCurrentPosition({
-    enableHighAccuracy: precise,
+    enableHighAccuracy: await requestLocationAccuracy(),
     timeout: 12000,
     maximumAge: 30000,
   });
@@ -28,6 +31,26 @@ export async function currentPosition() {
       '위치 오차가 100m를 넘어요. 지도에서 출발점을 직접 선택해 주세요.',
     );
   return position;
+}
+export async function watchCurrentPosition(
+  onPosition: (position: Position) => void,
+  onError: () => void,
+) {
+  const precise = await requestLocationAccuracy();
+  const id = await Geolocation.watchPosition(
+    {
+      enableHighAccuracy: precise,
+      timeout: 15000,
+      maximumAge: 5000,
+      interval: 3000,
+      minimumUpdateInterval: 2000,
+    },
+    (position, error) => {
+      if (error || !position) onError();
+      else onPosition(position);
+    },
+  );
+  return () => Geolocation.clearWatch({ id });
 }
 export async function exportFile(name: string, content: string, type: string) {
   if (Capacitor.isNativePlatform()) {

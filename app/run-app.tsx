@@ -16,7 +16,6 @@ import {
   SlidersHorizontal,
   Play,
   Pause,
-  Square,
   X,
   Activity,
   Compass,
@@ -32,6 +31,7 @@ import {
   MapPin,
   Route as RouteIcon,
   Timer,
+  Maximize,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -71,6 +71,7 @@ import {
   type RunRecord,
 } from '@/lib/records';
 import MapView from './map-view';
+import NavigationScreen from './navigation-screen';
 import RouteTerrain from './route-terrain';
 import RunSetup, { RunPreferences, modes } from './run-setup';
 import { COURSE_THEMES } from '@/lib/recommender';
@@ -144,6 +145,8 @@ export default function RunApp() {
     [dirty, setDirty] = useState(false),
     [picking, setPicking] = useState(false),
     [locationBusy, setLocationBusy] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false),
+    [navigationOpen, setNavigationOpen] = useState(true);
   const [tab, setTab] = useState('explore'),
     [notice, setNotice] = useState(''),
     [category, setCategory] = useState('all');
@@ -224,7 +227,9 @@ export default function RunApp() {
       try {
         setRecords(parseRecords(localStorage.getItem(RECORD_KEY)));
         try {
-          setSession(parseSession(localStorage.getItem(SESSION_KEY)));
+          const restored = parseSession(localStorage.getItem(SESSION_KEY));
+          setSession(restored);
+          if (restored) setSetupStep(null);
           setNow(Date.now());
         } catch (e) {
           setSessionError(
@@ -240,6 +245,7 @@ export default function RunApp() {
     return () => abort.abort();
   }, []);
   function update(patch: Partial<RouteInput>) {
+    setPreviewOpen(false);
     computeId.current++;
     setBusy(false);
     setForm((v) => ({ ...v, ...patch }));
@@ -346,7 +352,21 @@ export default function RunApp() {
       actualMinutes: null,
     };
     if (start) {
-      storeSession({ record: item, elapsedMs: 0, resumedAt: Date.now() });
+      if (
+        storeSession({
+          record: item,
+          elapsedMs: 0,
+          resumedAt: Date.now(),
+          navigation: {
+            mode: submitted.mode,
+            destination: [shownDestination.lon, shownDestination.lat],
+            destinationIndex: route.destinationIndex,
+          },
+        })
+      ) {
+        setPreviewOpen(false);
+        setNavigationOpen(true);
+      }
       return;
     }
     if (saveRecord(item)) {
@@ -374,6 +394,7 @@ export default function RunApp() {
       if (next) localStorage.setItem(SESSION_KEY, JSON.stringify(next));
       else localStorage.removeItem(SESSION_KEY);
       setSession(next);
+      setSetupStep(null);
       setNow(Date.now());
       return true;
     } catch {
@@ -385,7 +406,7 @@ export default function RunApp() {
   }
   function pauseSession() {
     if (session)
-      storeSession({
+      return storeSession({
         ...session,
         elapsedMs: elapsed(session, Date.now()),
         resumedAt: null,
@@ -394,7 +415,7 @@ export default function RunApp() {
   function finishSession() {
     if (!session) return;
     const minutes = elapsed(session, Date.now()) / 60000;
-    pauseSession();
+    if (!pauseSession()) return;
     setFinish(session.record);
     setActualKm('');
     setActualMinutes(Math.max(0.1, Math.min(1440, minutes)).toFixed(1));
@@ -461,506 +482,572 @@ export default function RunApp() {
     );
   return (
     <div className="phone-app">
-      <header className="app-header">
-        <button
-          className="wordmark"
-          onClick={() => setTab('explore')}
-          aria-label="런앤로컬 탐색"
-        >
-          RUN<span>&</span>LOCAL<span className="brand-period">.</span>
-        </button>
-        <button className="city-switch" onClick={() => setSheet('about')}>
-          <span /> 강릉 <ChevronDown size={15} />
-        </button>
-      </header>
-      <Tabs
-        value={tab}
-        onValueChange={(v) => setTab(String(v))}
-        className="app-tabs"
-      >
-        <TabsContent value="explore" className="explore-screen">
-          {loadError ? (
-            <div className="loading-screen">
-              <MapPin size={32} />
-              <h1>지도를 불러오지 못했어요</h1>
-              <p>{loadError}</p>
-              <Button onClick={() => window.location.reload()}>
-                다시 시도
-              </Button>
-            </div>
-          ) : !graph ? (
-            <div className="loading-screen">
-              <span className="loading-orbit" />
-              <h1>달릴 길을 찾고 있어요</h1>
-              <p>강릉의 실제 지도와 연결 중</p>
-            </div>
-          ) : (
-            <>
-              <div className="map-stage">
-                <MapView
-                  graph={graph}
-                  origin={origin}
-                  destination={destination}
-                  routes={dirty ? [] : (result?.routes ?? [])}
-                  selected={selected}
-                  picking={picking}
-                  onOrigin={(point) => {
-                    update({ origin: { lon: point[0], lat: point[1] } });
-                    setPicking(false);
-                    setSheet('settings');
-                  }}
-                  onSelect={setSelected}
-                />
-                <button
-                  className="destination-search"
-                  onClick={() => setSheet('place')}
-                >
-                  <span className="search-pin">
-                    <MapPin size={18} />
-                  </span>
-                  <span>
-                    <small>오늘의 목적지</small>
-                    <strong>
-                      {destination?.name ?? '어디까지 달려볼까요?'}
-                    </strong>
-                  </span>
-                  <ChevronDown size={19} />
-                </button>
-                <div className="map-tools">
-                  <Button
-                    variant="secondary"
-                    size="icon"
-                    aria-label="현위치를 출발점으로"
-                    disabled={locationBusy}
-                    onClick={() => void locate()}
-                  >
-                    <LocateFixed
-                      size={20}
-                      className={locationBusy ? 'locating' : ''}
+      {!(
+        graph &&
+        ((session && navigationOpen) || (previewOpen && route && !dirty))
+      ) && (
+        <>
+          <header className="app-header">
+            <button
+              className="wordmark"
+              onClick={() => setTab('explore')}
+              aria-label="런앤로컬 탐색"
+            >
+              RUN<span>&</span>LOCAL<span className="brand-period">.</span>
+            </button>
+            <button className="city-switch" onClick={() => setSheet('about')}>
+              <span /> 강릉 <ChevronDown size={15} />
+            </button>
+          </header>
+          <Tabs
+            value={tab}
+            onValueChange={(v) => setTab(String(v))}
+            className="app-tabs"
+          >
+            <TabsContent value="explore" className="explore-screen">
+              {loadError ? (
+                <div className="loading-screen">
+                  <MapPin size={32} />
+                  <h1>지도를 불러오지 못했어요</h1>
+                  <p>{loadError}</p>
+                  <Button onClick={() => window.location.reload()}>
+                    다시 시도
+                  </Button>
+                </div>
+              ) : !graph ? (
+                <div className="loading-screen">
+                  <span className="loading-orbit" />
+                  <h1>달릴 길을 찾고 있어요</h1>
+                  <p>강릉의 실제 지도와 연결 중</p>
+                </div>
+              ) : (
+                <>
+                  <div className="map-stage">
+                    <MapView
+                      graph={graph}
+                      origin={origin}
+                      destination={destination}
+                      routes={dirty ? [] : (result?.routes ?? [])}
+                      selected={selected}
+                      picking={picking}
+                      onOrigin={(point) => {
+                        update({ origin: { lon: point[0], lat: point[1] } });
+                        setPicking(false);
+                        setSheet('settings');
+                      }}
+                      onSelect={setSelected}
                     />
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="icon"
-                    aria-label="지도를 눌러 출발점 선택"
-                    aria-pressed={picking}
-                    onClick={() => setPicking(!picking)}
-                  >
-                    <MapPin size={20} />
-                  </Button>
-                </div>
-                <button
-                  className="map-origin"
-                  onClick={() => setSheet('settings')}
-                >
-                  <span className="origin-dot" />
-                  {originPreset?.name ?? '선택한 출발점'}
-                  <ChevronRight size={14} />
-                </button>
-              </div>
-              <section className="discovery-panel">
-                {sessionError && <p className="inline-error">{sessionError}</p>}
-                <div className="sheet-handle" />
-                <div className="discovery-heading">
-                  <div>
-                    <p className="overline">YOUR NEXT RUN</p>
-                    <h1>
-                      {dirty
-                        ? '어떤 길로 달릴까요?'
-                        : submitted.theme === 'river'
-                          ? '강변을 만나는 러닝.'
-                          : submitted.theme === 'lake'
-                            ? '호수를 만나는 러닝.'
-                            : submitted.theme === 'forest'
-                              ? '흙길을 만나는 러닝.'
-                              : submitted.scenery === 'water'
-                                ? '오늘은, 바다 쪽으로.'
-                                : submitted.scenery === 'green'
-                                  ? '초록을 따라 달려요.'
-                                  : '내 속도로 만나는 동네.'}
-                    </h1>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label="러닝 조건 설정"
-                    onClick={() => setSheet('settings')}
-                  >
-                    <SlidersHorizontal size={22} />
-                  </Button>
-                </div>
-                <button
-                  className="condition-strip"
-                  onClick={() => setSheet('settings')}
-                >
-                  <Timer size={15} />
-                  <span>
-                    {form.targetDistanceKm ?? form.maxDistanceKm}km 목표
-                  </span>
-                  <i />
-                  <span>{modes[form.mode]}</span>
-                  <i />
-                  <span>
-                    {form.theme
-                      ? COURSE_THEMES[form.theme]
-                      : sceneries[form.scenery]}
-                  </span>
-                  <span className="edit-label">변경</span>
-                </button>
-                {dirty ? (
-                  <div className="empty-course">
-                    <p>새로운 조건으로 코스를 찾아보세요.</p>
-                    <Button
-                      className="primary-action"
-                      onClick={calculate}
-                      disabled={busy}
+                    <button
+                      className="destination-search"
+                      onClick={() => setSheet('place')}
                     >
-                      {busy ? '계산 중…' : '이 조건으로 코스 찾기'}
-                      <ArrowRight size={20} />
-                    </Button>
-                  </div>
-                ) : result?.status !== 'ok' ? (
-                  <div className="empty-course">
-                    <h2>조건에 맞는 길을 찾지 못했어요</h2>
-                    <p>{result?.message}</p>
-                    <Button
-                      className="primary-action"
+                      <span className="search-pin">
+                        <MapPin size={18} />
+                      </span>
+                      <span>
+                        <small>오늘의 목적지</small>
+                        <strong>
+                          {destination?.name ?? '어디까지 달려볼까요?'}
+                        </strong>
+                      </span>
+                      <ChevronDown size={19} />
+                    </button>
+                    <div className="map-tools">
+                      <Button
+                        variant="secondary"
+                        size="icon"
+                        aria-label="현위치를 출발점으로"
+                        disabled={locationBusy}
+                        onClick={() => void locate()}
+                      >
+                        <LocateFixed
+                          size={20}
+                          className={locationBusy ? 'locating' : ''}
+                        />
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="icon"
+                        aria-label="지도를 눌러 출발점 선택"
+                        aria-pressed={picking}
+                        onClick={() => setPicking(!picking)}
+                      >
+                        <MapPin size={20} />
+                      </Button>
+                    </div>
+                    {route && !dirty && (
+                      <Button
+                        className="map-expand"
+                        variant="secondary"
+                        onClick={() => setPreviewOpen(true)}
+                      >
+                        <Maximize size={16} /> 크게 보기
+                      </Button>
+                    )}
+                    <button
+                      className="map-origin"
                       onClick={() => setSheet('settings')}
                     >
-                      시간·출발점 바꾸기
-                      <ArrowRight size={20} />
-                    </Button>
+                      <span className="origin-dot" />
+                      {originPreset?.name ?? '선택한 출발점'}
+                      <ChevronRight size={14} />
+                    </button>
                   </div>
-                ) : (
-                  <>
-                    <div className="route-options" aria-label="추천 코스 선택">
-                      {result.routes.map((r, i) => (
-                        <button
-                          key={r.id}
-                          className={`course-option ${selected === i ? 'selected' : ''}`}
-                          onClick={() => setSelected(i)}
-                          aria-pressed={selected === i}
-                        >
-                          <span>
-                            {i === 0 ? 'BEST FIT' : `ROUTE 0${i + 1}`}
-                            {selected === i && <Check size={13} />}
-                          </span>
-                          <strong>
-                            {formatKm(r.distanceMeters)}
-                            <small>km</small>
-                          </strong>
-                          <p>
-                            {Math.ceil(r.bufferedMinutes)}분 ·{' '}
-                            {modes[submitted.mode]}
-                          </p>
-                          <small className="route-climb">
-                            ↗{' '}
-                            {r.terrain.ascentMeters === null
-                              ? '경사 미확인'
-                              : `추정 ${Math.round(r.terrain.ascentMeters)}m 상승`}
-                          </small>
-                        </button>
-                      ))}
+                  <section className="discovery-panel">
+                    {sessionError && (
+                      <p className="inline-error">{sessionError}</p>
+                    )}
+                    <div className="sheet-handle" />
+                    <div className="discovery-heading">
+                      <div>
+                        <p className="overline">YOUR NEXT RUN</p>
+                        <h1>
+                          {dirty
+                            ? '어떤 길로 달릴까요?'
+                            : submitted.theme === 'river'
+                              ? '강변을 만나는 러닝.'
+                              : submitted.theme === 'lake'
+                                ? '호수를 만나는 러닝.'
+                                : submitted.theme === 'forest'
+                                  ? '흙길을 만나는 러닝.'
+                                  : submitted.scenery === 'water'
+                                    ? '오늘은, 바다 쪽으로.'
+                                    : submitted.scenery === 'green'
+                                      ? '초록을 따라 달려요.'
+                                      : '내 속도로 만나는 동네.'}
+                        </h1>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label="러닝 조건 설정"
+                        onClick={() => setSheet('settings')}
+                      >
+                        <SlidersHorizontal size={22} />
+                      </Button>
                     </div>
-                    {route && (
-                      <>
-                        <div className="course-caption">
-                          <span>
-                            <RouteIcon size={15} />
-                            {submitted.theme
-                              ? COURSE_THEMES[submitted.theme]
-                              : '내 조건에 맞춘 길'}
-                            {submitted.theme &&
-                              submitted.theme !== 'any' &&
-                              ` · 포함 ${Math.round((route.terrain.themeMatchRatio ?? 0) * route.terrain.themeCoverageRatio * 100)}%`}
-                          </span>
-                          <button onClick={() => setSheet('about')}>
-                            추천 이유 <ArrowUpRight size={14} />
-                          </button>
-                        </div>
-                        <div className="start-actions">
-                          <Button
-                            className="primary-action"
-                            disabled={!!session || !!sessionError}
-                            onClick={() => addPlan(true)}
-                          >
-                            <Play size={18} fill="currentColor" />
-                            {session
-                              ? '진행 중인 러닝이 있어요'
-                              : '이 코스로 달리기'}
-                            <ArrowRight size={20} />
-                          </Button>
-                          <Button
-                            className="save-route"
-                            variant="outline"
-                            size="icon"
-                            aria-label="이 코스를 내 챌린지에 저장"
-                            onClick={() => addPlan()}
-                          >
-                            <Bookmark size={21} />
-                          </Button>
-                        </div>
-                        <RouteTerrain route={route} theme={submitted.theme} />
-                        <button
-                          className="destination-card"
-                          onClick={() => setSheet('place')}
+                    <button
+                      className="condition-strip"
+                      onClick={() => setSheet('settings')}
+                    >
+                      <Timer size={15} />
+                      <span>
+                        {form.targetDistanceKm ?? form.maxDistanceKm}km 목표
+                      </span>
+                      <i />
+                      <span>{modes[form.mode]}</span>
+                      <i />
+                      <span>
+                        {form.theme
+                          ? COURSE_THEMES[form.theme]
+                          : sceneries[form.scenery]}
+                      </span>
+                      <span className="edit-label">변경</span>
+                    </button>
+                    {dirty ? (
+                      <div className="empty-course">
+                        <p>새로운 조건으로 코스를 찾아보세요.</p>
+                        <Button
+                          className="primary-action"
+                          onClick={calculate}
+                          disabled={busy}
                         >
-                          <div className="destination-thumb">
-                            {shownDestination?.id === 'way/648051405' ? (
-                              <img
-                                src="/images/gangmun-beach.jpg"
-                                alt="강문해변의 GANGMUN 포토존과 바다"
-                              />
-                            ) : shownDestination?.category === 'cafe' ? (
-                              <Coffee size={28} />
-                            ) : (
-                              <MapPin size={28} />
-                            )}
-                          </div>
-                          <span>
-                            <small>달리기 끝에 만나는</small>
-                            <strong>{shownDestination?.name}</strong>
-                            <em>
-                              {shownDestination
-                                ? categories[shownDestination.category]
-                                : ''}{' '}
-                              · {submitted.pauseMinutes}분 머무르기
-                            </em>
-                          </span>
-                          <ArrowUpRight size={19} />
-                        </button>
-                        <p className="route-disclaimer">
-                          현장 통행·상점 입구·영업 여부는 방문 전 확인해 주세요.
-                        </p>
+                          {busy ? '계산 중…' : '이 조건으로 코스 찾기'}
+                          <ArrowRight size={20} />
+                        </Button>
+                      </div>
+                    ) : result?.status !== 'ok' ? (
+                      <div className="empty-course">
+                        <h2>조건에 맞는 길을 찾지 못했어요</h2>
+                        <p>{result?.message}</p>
+                        <Button
+                          className="primary-action"
+                          onClick={() => setSheet('settings')}
+                        >
+                          시간·출발점 바꾸기
+                          <ArrowRight size={20} />
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
+                        <div
+                          className="route-options"
+                          aria-label="추천 코스 선택"
+                        >
+                          {result.routes.map((r, i) => (
+                            <button
+                              key={r.id}
+                              className={`course-option ${selected === i ? 'selected' : ''}`}
+                              onClick={() => setSelected(i)}
+                              aria-pressed={selected === i}
+                            >
+                              <span>
+                                {i === 0 ? 'BEST FIT' : `ROUTE 0${i + 1}`}
+                                {selected === i && <Check size={13} />}
+                              </span>
+                              <strong>
+                                {formatKm(r.distanceMeters)}
+                                <small>km</small>
+                              </strong>
+                              <p>
+                                {Math.ceil(r.bufferedMinutes)}분 ·{' '}
+                                {modes[submitted.mode]}
+                              </p>
+                              <small className="route-climb">
+                                ↗{' '}
+                                {r.terrain.ascentMeters === null
+                                  ? '경사 미확인'
+                                  : `추정 ${Math.round(r.terrain.ascentMeters)}m 상승`}
+                              </small>
+                            </button>
+                          ))}
+                        </div>
+                        {route && (
+                          <>
+                            <div className="course-caption">
+                              <span>
+                                <RouteIcon size={15} />
+                                {submitted.theme
+                                  ? COURSE_THEMES[submitted.theme]
+                                  : '내 조건에 맞춘 길'}
+                                {submitted.theme &&
+                                  submitted.theme !== 'any' &&
+                                  ` · 포함 ${Math.round((route.terrain.themeMatchRatio ?? 0) * route.terrain.themeCoverageRatio * 100)}%`}
+                              </span>
+                              <button onClick={() => setSheet('about')}>
+                                추천 이유 <ArrowUpRight size={14} />
+                              </button>
+                            </div>
+                            <div className="start-actions">
+                              <Button
+                                className="primary-action"
+                                disabled={!!session || !!sessionError}
+                                onClick={() => addPlan(true)}
+                              >
+                                <Play size={18} fill="currentColor" />
+                                {session
+                                  ? '진행 중인 러닝이 있어요'
+                                  : '이 코스로 달리기'}
+                                <ArrowRight size={20} />
+                              </Button>
+                              <Button
+                                className="save-route"
+                                variant="outline"
+                                size="icon"
+                                aria-label="이 코스를 내 챌린지에 저장"
+                                onClick={() => addPlan()}
+                              >
+                                <Bookmark size={21} />
+                              </Button>
+                            </div>
+                            <RouteTerrain
+                              route={route}
+                              theme={submitted.theme}
+                            />
+                            <button
+                              className="destination-card"
+                              onClick={() => setSheet('place')}
+                            >
+                              <div className="destination-thumb">
+                                {shownDestination?.id === 'way/648051405' ? (
+                                  <img
+                                    src="/images/gangmun-beach.jpg"
+                                    alt="강문해변의 GANGMUN 포토존과 바다"
+                                  />
+                                ) : shownDestination?.category === 'cafe' ? (
+                                  <Coffee size={28} />
+                                ) : (
+                                  <MapPin size={28} />
+                                )}
+                              </div>
+                              <span>
+                                <small>달리기 끝에 만나는</small>
+                                <strong>{shownDestination?.name}</strong>
+                                <em>
+                                  {shownDestination
+                                    ? categories[shownDestination.category]
+                                    : ''}{' '}
+                                  · {submitted.pauseMinutes}분 머무르기
+                                </em>
+                              </span>
+                              <ArrowUpRight size={19} />
+                            </button>
+                            <p className="route-disclaimer">
+                              현장 통행·상점 입구·영업 여부는 방문 전 확인해
+                              주세요.
+                            </p>
+                          </>
+                        )}
                       </>
                     )}
-                  </>
-                )}
-              </section>
-            </>
-          )}
-        </TabsContent>
-        <TabsContent value="challenge" className="content-screen">
-          <div className="screen-title">
-            <p className="overline">ONE RUN AT A TIME</p>
-            <h1>
-              나의 챌린지<span>.</span>
-            </h1>
-            <p>저장해 둔 목적지, 다음 러닝의 이유.</p>
-          </div>
-          <div className="challenge-total">
-            <div>
-              <span>완료한 챌린지</span>
-              <strong>
-                {completed.length}
-                <small>회</small>
-              </strong>
-            </div>
-            <div className="completion-ring">
-              <Flag size={32} />
-            </div>
-            <p>
-              목적지 하나씩,
-              <br />
-              나만의 강릉을 채워가요.
-            </p>
-          </div>
-          <div className="section-line">
-            <h2>달릴 예정</h2>
-            <span>{records.length - completed.length}개</span>
-          </div>
-          {records.filter((r) => !r.completedAt).length === 0 ? (
-            <div className="empty-state">
-              <Bookmark size={30} />
-              <h3>다음 목적지를 담아보세요</h3>
-              <p>
-                마음에 드는 코스에서 책갈피를 누르면
-                <br />
-                여기에 나만의 챌린지가 모여요.
-              </p>
-              <Button variant="outline" onClick={() => setTab('explore')}>
-                코스 둘러보기
-                <ArrowRight size={17} />
-              </Button>
-            </div>
-          ) : (
-            records
-              .filter((r) => !r.completedAt)
-              .map((r, i) => (
-                <article className="saved-course" key={r.id}>
-                  <span className="saved-number">
-                    {String(i + 1).padStart(2, '0')}
-                  </span>
-                  <div>
-                    <small>강릉 · 저장한 코스</small>
-                    <h3>{r.destination}</h3>
-                    <p>
-                      {formatKm(r.plannedMeters)} km <span>·</span> 약{' '}
-                      {Math.ceil(r.plannedMinutes)}분
-                    </p>
-                    <div className="saved-actions">
-                      <Button
-                        variant="ghost"
-                        onClick={() => {
-                          setFinish(r);
-                          setActualKm('');
-                          setActualMinutes('');
-                          setFinishError('');
-                        }}
-                      >
-                        완주 기록
-                        <ChevronRight size={15} />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => requestExport(r.geometry)}
-                        aria-label={`${r.destination} GPX 공유`}
-                      >
-                        <Share2 size={16} />
-                      </Button>
-                    </div>
-                  </div>
-                </article>
-              ))
-          )}
-          {storageError && <p className="inline-error">{storageError}</p>}
-        </TabsContent>
-        <TabsContent value="records" className="content-screen">
-          <div className="runner-profile-card">
-            <span>
-              <small>이 기기의 러너</small>
-              <strong>{profile?.nickname || '러너'}님</strong>
-            </span>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setDraftProfile(profile ?? DEFAULT_PROFILE);
-                setSetupStep(1);
-              }}
-            >
-              내 정보
-            </Button>
-            <Button onClick={() => setSetupStep(2)}>새 러닝</Button>
-          </div>
-          <div className="screen-title">
-            <p className="overline">EVERY KILOMETER COUNTS</p>
-            <h1>
-              내가 달린 기록<span>.</span>
-            </h1>
-            <p>어제보다 한 걸음, 나만의 페이스로.</p>
-          </div>
-          <div className="distance-total">
-            <span>누적 러닝 거리</span>
-            <strong>
-              {completed
-                .reduce((sum, r) => sum + (r.actualKm ?? 0), 0)
-                .toFixed(1)}
-              <small>km</small>
-            </strong>
-            <div>
-              <span>
-                <Flag size={15} />
-                {completed.length}회 완료
-              </span>
-              <span>
-                <Timer size={15} />
-                {Math.round(
-                  completed.reduce((sum, r) => sum + (r.actualMinutes ?? 0), 0),
-                )}
-                분
-              </span>
-            </div>
-          </div>
-          <div className="section-line">
-            <h2>러닝 히스토리</h2>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="기록 JSON 내보내기"
-              disabled={!records.length}
-              onClick={() =>
-                void exportFile(
-                  'run-and-local-records.json',
-                  JSON.stringify(records, null, 2),
-                  'application/json',
-                ).catch(() => setNotice('기록을 내보내지 못했어요.'))
-              }
-            >
-              <Download size={19} />
-            </Button>
-          </div>
-          {!completed.length ? (
-            <div className="empty-state">
-              <Activity size={32} />
-              <h3>첫 러닝을 기다리고 있어요</h3>
-              <p>달린 뒤 실제 거리와 시간을 남겨주세요.</p>
-              <Button variant="outline" onClick={() => setTab('explore')}>
-                러닝 시작하기
-                <ArrowRight size={17} />
-              </Button>
-            </div>
-          ) : (
-            completed.map((r) => (
-              <article className="history-item" key={r.id}>
-                <span className="history-check">
-                  <Check size={21} />
-                </span>
+                  </section>
+                </>
+              )}
+            </TabsContent>
+            <TabsContent value="challenge" className="content-screen">
+              <div className="screen-title">
+                <p className="overline">ONE RUN AT A TIME</p>
+                <h1>
+                  나의 챌린지<span>.</span>
+                </h1>
+                <p>저장해 둔 목적지, 다음 러닝의 이유.</p>
+              </div>
+              <div className="challenge-total">
                 <div>
-                  <small>
-                    {new Date(r.completedAt!).toLocaleDateString('ko-KR')}
-                  </small>
-                  <h3>{r.destination}</h3>
-                  <p>
-                    {r.actualKm} km <span>·</span> {r.actualMinutes}분
-                  </p>
-                  <small>거리 직접 입력</small>
+                  <span>완료한 챌린지</span>
+                  <strong>
+                    {completed.length}
+                    <small>회</small>
+                  </strong>
                 </div>
+                <div className="completion-ring">
+                  <Flag size={32} />
+                </div>
+                <p>
+                  목적지 하나씩,
+                  <br />
+                  나만의 강릉을 채워가요.
+                </p>
+              </div>
+              <div className="section-line">
+                <h2>달릴 예정</h2>
+                <span>{records.length - completed.length}개</span>
+              </div>
+              {records.filter((r) => !r.completedAt).length === 0 ? (
+                <div className="empty-state">
+                  <Bookmark size={30} />
+                  <h3>다음 목적지를 담아보세요</h3>
+                  <p>
+                    마음에 드는 코스에서 책갈피를 누르면
+                    <br />
+                    여기에 나만의 챌린지가 모여요.
+                  </p>
+                  <Button variant="outline" onClick={() => setTab('explore')}>
+                    코스 둘러보기
+                    <ArrowRight size={17} />
+                  </Button>
+                </div>
+              ) : (
+                records
+                  .filter((r) => !r.completedAt)
+                  .map((r, i) => (
+                    <article className="saved-course" key={r.id}>
+                      <span className="saved-number">
+                        {String(i + 1).padStart(2, '0')}
+                      </span>
+                      <div>
+                        <small>강릉 · 저장한 코스</small>
+                        <h3>{r.destination}</h3>
+                        <p>
+                          {formatKm(r.plannedMeters)} km <span>·</span> 약{' '}
+                          {Math.ceil(r.plannedMinutes)}분
+                        </p>
+                        <div className="saved-actions">
+                          <Button
+                            variant="ghost"
+                            onClick={() => {
+                              setFinish(r);
+                              setActualKm('');
+                              setActualMinutes('');
+                              setFinishError('');
+                            }}
+                          >
+                            완주 기록
+                            <ChevronRight size={15} />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            onClick={() => requestExport(r.geometry)}
+                            aria-label={`${r.destination} GPX 공유`}
+                          >
+                            <Share2 size={16} />
+                          </Button>
+                        </div>
+                      </div>
+                    </article>
+                  ))
+              )}
+              {storageError && <p className="inline-error">{storageError}</p>}
+            </TabsContent>
+            <TabsContent value="records" className="content-screen">
+              <div className="runner-profile-card">
+                <span>
+                  <small>이 기기의 러너</small>
+                  <strong>{profile?.nickname || '러너'}님</strong>
+                </span>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setDraftProfile(profile ?? DEFAULT_PROFILE);
+                    setSetupStep(1);
+                  }}
+                >
+                  내 정보
+                </Button>
+                <Button onClick={() => setSetupStep(2)}>새 러닝</Button>
+              </div>
+              <div className="screen-title">
+                <p className="overline">EVERY KILOMETER COUNTS</p>
+                <h1>
+                  내가 달린 기록<span>.</span>
+                </h1>
+                <p>어제보다 한 걸음, 나만의 페이스로.</p>
+              </div>
+              <div className="distance-total">
+                <span>누적 러닝 거리</span>
+                <strong>
+                  {completed
+                    .reduce((sum, r) => sum + (r.actualKm ?? 0), 0)
+                    .toFixed(1)}
+                  <small>km</small>
+                </strong>
+                <div>
+                  <span>
+                    <Flag size={15} />
+                    {completed.length}회 완료
+                  </span>
+                  <span>
+                    <Timer size={15} />
+                    {Math.round(
+                      completed.reduce(
+                        (sum, r) => sum + (r.actualMinutes ?? 0),
+                        0,
+                      ),
+                    )}
+                    분
+                  </span>
+                </div>
+              </div>
+              <div className="section-line">
+                <h2>러닝 히스토리</h2>
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label={`${r.destination} 경로 공유`}
-                  onClick={() => requestExport(r.geometry)}
+                  aria-label="기록 JSON 내보내기"
+                  disabled={!records.length}
+                  onClick={() =>
+                    void exportFile(
+                      'run-and-local-records.json',
+                      JSON.stringify(records, null, 2),
+                      'application/json',
+                    ).catch(() => setNotice('기록을 내보내지 못했어요.'))
+                  }
                 >
-                  <Share2 size={18} />
+                  <Download size={19} />
                 </Button>
-              </article>
-            ))
+              </div>
+              {!completed.length ? (
+                <div className="empty-state">
+                  <Activity size={32} />
+                  <h3>첫 러닝을 기다리고 있어요</h3>
+                  <p>달린 뒤 실제 거리와 시간을 남겨주세요.</p>
+                  <Button variant="outline" onClick={() => setTab('explore')}>
+                    러닝 시작하기
+                    <ArrowRight size={17} />
+                  </Button>
+                </div>
+              ) : (
+                completed.map((r) => (
+                  <article className="history-item" key={r.id}>
+                    <span className="history-check">
+                      <Check size={21} />
+                    </span>
+                    <div>
+                      <small>
+                        {new Date(r.completedAt!).toLocaleDateString('ko-KR')}
+                      </small>
+                      <h3>{r.destination}</h3>
+                      <p>
+                        {r.actualKm} km <span>·</span> {r.actualMinutes}분
+                      </p>
+                      <small>거리 직접 입력</small>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`${r.destination} 경로 공유`}
+                      onClick={() => requestExport(r.geometry)}
+                    >
+                      <Share2 size={18} />
+                    </Button>
+                  </article>
+                ))
+              )}
+              <button
+                className="settings-row"
+                onClick={() => setSheet('about')}
+              >
+                <Info size={18} />
+                <span>앱 정보 · 데이터와 개인정보</span>
+                <ChevronRight size={18} />
+              </button>
+              <a
+                className="settings-row"
+                href="https://run-and-local-gangneung.jason1207890.chatgpt.site/downloads/run-and-local.apk"
+                download
+              >
+                <Smartphone size={18} />
+                <span>Android 앱 설치 파일</span>
+                <Download size={18} />
+              </a>
+              <p className="local-note">
+                기록과 저장한 코스는 이 기기에 보관돼요.
+                <br />
+                앱을 삭제하기 전 기록을 내보내 주세요.
+              </p>
+            </TabsContent>
+            <TabsList className="bottom-nav">
+              <TabsTrigger value="explore">
+                <Compass />
+                <span>탐색</span>
+              </TabsTrigger>
+              <TabsTrigger value="challenge">
+                <Flag />
+                <span>챌린지</span>
+              </TabsTrigger>
+              <TabsTrigger value="records">
+                <Activity />
+                <span>내 기록</span>
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          {session && !navigationOpen && (
+            <div className="resume-map-banner">
+              <button
+                className="banner-info"
+                onClick={() => setNavigationOpen(true)}
+              >
+                <RouteIcon size={18} />
+                <span>
+                  {session.resumedAt === null ? '쉬어가는 중' : '러닝 중'} ·{' '}
+                  {timerText}
+                </span>
+                <strong>
+                  지도 열기 <ChevronRight size={15} />
+                </strong>
+              </button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() =>
+                  session.resumedAt === null
+                    ? storeSession({ ...session, resumedAt: Date.now() })
+                    : pauseSession()
+                }
+                aria-label={
+                  session.resumedAt === null ? '러닝 재개' : '러닝 일시정지'
+                }
+              >
+                {session.resumedAt === null ? (
+                  <Play size={16} />
+                ) : (
+                  <Pause size={16} />
+                )}
+              </Button>
+            </div>
           )}
-          <button className="settings-row" onClick={() => setSheet('about')}>
-            <Info size={18} />
-            <span>앱 정보 · 데이터와 개인정보</span>
-            <ChevronRight size={18} />
-          </button>
-          <a
-            className="settings-row"
-            href="https://run-and-local-gangneung.jason1207890.chatgpt.site/downloads/run-and-local.apk"
-            download
-          >
-            <Smartphone size={18} />
-            <span>Android 앱 설치 파일</span>
-            <Download size={18} />
-          </a>
-          <p className="local-note">
-            기록과 저장한 코스는 이 기기에 보관돼요.
-            <br />
-            앱을 삭제하기 전 기록을 내보내 주세요.
-          </p>
-        </TabsContent>
-        <TabsList className="bottom-nav">
-          <TabsTrigger value="explore">
-            <Compass />
-            <span>탐색</span>
-          </TabsTrigger>
-          <TabsTrigger value="challenge">
-            <Flag />
-            <span>챌린지</span>
-          </TabsTrigger>
-          <TabsTrigger value="records">
-            <Activity />
-            <span>내 기록</span>
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
+        </>
+      )}
       {notice && (
         <output className="toast-message">
           <span>{notice}</span>
@@ -969,59 +1056,53 @@ export default function RunApp() {
           </button>
         </output>
       )}
-      {session && (
-        <section className="running-overlay" aria-label="진행 중인 러닝">
-          <header>
-            <span className="running-live" />
-            {session.resumedAt === null ? '잠시 쉬어가는 중' : '러닝 중'}
-            <small>기기에서 시간 측정</small>
-          </header>
-          <div className="running-goal">
-            <Flag size={20} />
-            <h2>{session.record.destination}</h2>
-            <p>계획 {formatKm(session.record.plannedMeters)} km</p>
-          </div>
-          <p className="overline">RUNNING TIME</p>
-          <strong className="running-clock">{timerText}</strong>
-          <p className="running-help">
-            내 페이스에 집중하세요.
-            <br />
-            달린 거리는 종료 후 직접 기록해요.
-          </p>
-          <div className="running-route">
-            <RouteIcon size={24} />
-            <span>내 코스 확인</span>
-            <Button
-              variant="ghost"
-              onClick={() => requestExport(session.record.geometry)}
-            >
-              GPX 공유
-              <Share2 size={17} />
-            </Button>
-          </div>
-          <div className="running-controls">
-            <Button
-              className="pause-action"
-              onClick={() =>
-                session.resumedAt === null
-                  ? storeSession({ ...session, resumedAt: Date.now() })
-                  : pauseSession()
-              }
-            >
-              {session.resumedAt === null ? (
-                <Play size={28} fill="currentColor" />
-              ) : (
-                <Pause size={28} fill="currentColor" />
-              )}
-              {session.resumedAt === null ? '이어서 달리기' : '일시정지'}
-            </Button>
-            <Button className="end-action" onClick={finishSession}>
-              <Square size={21} fill="currentColor" />
-              러닝 종료
-            </Button>
-          </div>
-        </section>
+      {graph && session && navigationOpen && (
+        <NavigationScreen
+          graph={graph}
+          geometry={session.record.geometry}
+          destinationName={session.record.destination}
+          plan={session.navigation}
+          plannedMeters={session.record.plannedMeters}
+          plannedMinutes={session.record.plannedMinutes}
+          now={now}
+          timer={timerText}
+          paused={session.resumedAt === null}
+          onBack={() => {
+            setNavigationOpen(false);
+            if (!result) setTab('records');
+          }}
+          onPause={() =>
+            session.resumedAt === null
+              ? storeSession({ ...session, resumedAt: Date.now() })
+              : pauseSession()
+          }
+          onFinish={finishSession}
+          onShare={() => requestExport(session.record.geometry)}
+        />
       )}
+      {graph &&
+        previewOpen &&
+        route &&
+        !dirty &&
+        shownDestination &&
+        !(session && navigationOpen) && (
+          <NavigationScreen
+            graph={graph}
+            geometry={route.geometry}
+            destinationName={shownDestination.name}
+            plan={{
+              mode: submitted.mode,
+              destination: [shownDestination.lon, shownDestination.lat],
+              destinationIndex: route.destinationIndex,
+            }}
+            plannedMeters={route.distanceMeters}
+            plannedMinutes={route.bufferedMinutes}
+            now={now}
+            onBack={() => setPreviewOpen(false)}
+            onStart={!session ? () => addPlan(true) : undefined}
+            onShare={() => requestExport()}
+          />
+        )}
       <Dialog
         open={sheet !== null}
         onOpenChange={(open) => {
@@ -1248,8 +1329,10 @@ export default function RunApp() {
                 <h2>내 기록과 개인정보</h2>
                 <p>
                   위치는 현위치 버튼을 누를 때만 요청해요. 저장한 코스에는 출발
-                  위치가 포함되며, 러닝 기록과 함께 이 기기에만 보관해요. 위치를
-                  계속 추적하거나 GPS로 완주를 판정하지 않아요. 앱 삭제 시
+                  위치가 포함되며, 러닝 기록과 함께 이 기기에만 보관해요. 지도
+                  화면에서 현재 위치를 켜면 위치를 갱신해요. 지도를 닫거나 앱을
+                  벗어나거나 러닝을 일시정지하면 위치 표시를 중지해요. 위치
+                  이력은 저장하지 않고 GPS로 완주를 판정하지 않아요. 앱 삭제 시
                   기록이 사라질 수 있어요.
                 </p>
                 <h2>데이터 출처</h2>
@@ -1370,7 +1453,7 @@ export default function RunApp() {
               onClick={() => {
                 if (storeSession(null)) {
                   setFinish(null);
-                  setTab('explore');
+                  setTab(result ? 'explore' : 'records');
                   setNotice('기록을 남기지 않고 러닝을 종료했어요.');
                 } else
                   setFinishError(

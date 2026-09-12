@@ -1,6 +1,13 @@
 import { parseRecords, type RunRecord } from './records.ts';
+import type { Coordinate, Mode } from './recommender.ts';
+export type NavigationPlan = {
+  mode: Mode;
+  destination: Coordinate;
+  destinationIndex: number;
+};
 export type RunSession = {
   record: RunRecord;
+  navigation?: NavigationPlan;
   elapsedMs: number;
   resumedAt: number | null;
 };
@@ -25,5 +32,23 @@ export function parseSession(raw: string | null): RunSession | null {
       '진행 중 러닝을 읽지 못했습니다. 저장된 원본은 유지합니다.',
     );
   parseRecords(JSON.stringify([s.record]));
+  if (s.navigation !== undefined) {
+    const n = s.navigation;
+    if (
+      !n ||
+      !['one_way', 'out_and_back', 'loop'].includes(n.mode) ||
+      !Array.isArray(n.destination) ||
+      n.destination.length !== 2 ||
+      !n.destination.every(Number.isFinite) ||
+      Math.abs(n.destination[0]) > 180 ||
+      Math.abs(n.destination[1]) > 90 ||
+      !Number.isInteger(n.destinationIndex) ||
+      n.destinationIndex < 0 ||
+      n.destinationIndex >= s.record.geometry.length
+    )
+      throw new Error(
+        '저장된 코스의 목적지 정보를 읽지 못했어요. 원본은 유지됩니다.',
+      );
+  }
   return s;
 }
