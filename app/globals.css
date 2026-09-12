@@ -1459,3 +1459,82 @@
     scroll-behavior: auto !important;
   }
 }
+
+body:has(.phone-preview) {
+  overflow: hidden;
+}
+.phone-preview {
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 20px 20px 14px;
+  background: radial-gradient(ellipse at 50% 35%, #f7f9f4, #dce5d8);
+}
+.preview-device-area {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+}
+.preview-device {
+  position: relative;
+  width: 414px;
+  height: 868px;
+  padding: 12px;
+  border-radius: 54px;
+  background: #171b18;
+  box-shadow:
+    inset 0 0 0 2px #646c62,
+    0 18px 45px #20312438;
+  transform-origin: top left;
+}
+.preview-device iframe {
+  display: block;
+  width: 390px;
+  height: 844px;
+  border: 0;
+  border-radius: 42px;
+  background: var(--paper);
+}
+.preview-camera {
+  position: absolute;
+  z-index: 1;
+  top: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 94px;
+  height: 22px;
+  border-radius: 20px;
+  background: #171b18;
+  pointer-events: none;
+}
+.preview-home-indicator {
+  position: absolute;
+  z-index: 1;
+  bottom: 19px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 114px;
+  height: 4px;
+  border-radius: 4px;
+  background: #708074;
+  pointer-events: none;
+}
+.preview-expand {
+  justify-self: center;
+  color: #53634f;
+  font-size: 13px;
+  line-height: 24px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+:root:has(.embedded-app) {
+  --safe-top: 32px;
+  --safe-bottom: 18px;
+  scrollbar-width: none;
+}
+body:has(.embedded-app) {
+  overscroll-behavior-y: contain;
+}

@@ -1,4 +1,4 @@
-import RunApp from './run-app';
+import PhonePreview from './phone-preview';
 export default function Home() {
-  return <RunApp />;
+  return <PhonePreview />;
 }
