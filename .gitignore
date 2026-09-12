@@ -39,3 +39,13 @@ next-env.d.ts
 
 # TypeScript cache
 *.tsbuildinfo
+
+/mobile-dist/
+/android/.gradle/
+/android/local.properties
+/android/**/build/
+/ios/App/build/
+/ios/App/Pods/
+*.keystore
+*.jks
+/public/downloads/

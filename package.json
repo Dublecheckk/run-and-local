@@ -11,10 +11,19 @@
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",
     "format": "oxfmt",
-    "test": "node --experimental-strip-types tests/routing.ts public/data/gangneung.json && node --experimental-strip-types tests/records.ts"
+    "test": "node --experimental-strip-types tests/routing.ts public/data/gangneung.json && node --experimental-strip-types tests/records.ts && node --experimental-strip-types tests/session.ts",
+    "build:mobile": "vite build --config vite.mobile.config.ts",
+    "sync:mobile": "npm run build:mobile && cap sync",
+    "dev:mobile": "vite --config vite.mobile.config.ts"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/filesystem": "^8.1.3",
+    "@capacitor/geolocation": "^8.2.2",
+    "@capacitor/ios": "^8.5.2",
+    "@capacitor/share": "^8.0.1",
     "@shadcn/react": "0.3.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
@@ -29,6 +38,7 @@
     "vinext": "^1.0.0-beta.9"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.2",
     "@cloudflare/vite-plugin": "^1.54.8",
     "@cloudflare/workers-types": "^5.20260911.1",
     "@openai/sites-vite-plugin": "0.2.0",

@@ -64,7 +64,7 @@ export default function MapView(props: Props) {
               [b.lat, b.lon],
             ] as Leaflet.LatLngTuple[];
           }),
-          { color: '#7999ad', weight: 1, opacity: 0.27, interactive: false },
+          { color: '#789276', weight: 1, opacity: 0.1, interactive: false },
         ).addTo(m);
         layer.current = L.layerGroup().addTo(m);
         m.on('click', (e) => {
@@ -98,10 +98,17 @@ export default function MapView(props: Props) {
       );
     for (const { route, i } of drawOrder) {
       const active = i === props.selected;
+      if (active)
+        L.polyline(route.geometry.map(latLng), {
+          color: '#fff',
+          weight: 9,
+          opacity: 0.95,
+          interactive: false,
+        }).addTo(group);
       L.polyline(route.geometry.map(latLng), {
-        color: active ? '#1855e8' : ['#1855e8', '#118c82', '#9c5bba'][i % 3],
-        weight: active ? 6 : 4,
-        opacity: active ? 1 : 0.5,
+        color: active ? '#284d35' : ['#284d35', '#71a671', '#a1b997'][i % 3],
+        weight: active ? 5 : 3,
+        opacity: active ? 1 : 0.4,
       })
         .on('click', () => current.current.onSelect(i))
         .addTo(group);
@@ -134,7 +141,8 @@ export default function MapView(props: Props) {
         ];
     if (bounds.length)
       m.fitBounds(L.latLngBounds(bounds), {
-        padding: [44, 44],
+        paddingTopLeft: [40, 100],
+        paddingBottomRight: [65, 75],
         maxZoom: 16,
         animate: false,
       });
