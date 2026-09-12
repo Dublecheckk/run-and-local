@@ -1,4 +1,6 @@
-# 런앤로컬 · 강릉 러닝
+# 런앤로컬 · 공익적 러닝 챌린지
+
+**목표:** 전국 사용자의 현재 위치 또는 지정 출발지에서, 오늘 가능한 시간·거리·선호 환경에 맞는 코스를 찾고 신체활동을 지속하도록 돕는 공익적 러닝 챌린지입니다. 구매나 소비는 참여·완료의 필수 조건이 아닙니다. **현재 구현의 지도 데이터는 강릉 일부 지역이며, 전국 경로 지원은 개발 예정입니다.** 통계 기반 선호계수 학습과 건강 개선 효과 검증도 아직 완료되지 않았습니다.
 
 실제 OpenStreetMap 보행망으로 계산하는 러닝 코스 추천 모바일 앱. Android·iOS 네이티브 프로젝트와 공개 체험 화면이 같은 추천 엔진과 화면을 사용합니다. 앱에는 코드와 지도 데이터가 포함되며 원격 웹페이지를 불러오는 설정을 사용하지 않습니다. 강릉 경포·초당·송정·안목 일부를 지원합니다. 정해진 예시 코스의 점수만 바꾸는 화면이 아니라, 입력한 출발점·목적지에서 경로를 생성합니다.
 
@@ -6,11 +8,15 @@
 
 [Android APK 설치](https://run-and-local-gangneung.jason1207890.chatgpt.site/downloads/run-and-local.apk) · [공개 체험 화면](https://run-and-local-gangneung.jason1207890.chatgpt.site/). Android 7.0 이상을 지원하는 서명된 릴리스 APK이며 Google Play 등록판은 아닙니다. iOS Xcode 프로젝트는 `ios/App/App.xcodeproj`입니다. iPhone 실기기·App Store 배포에는 Apple 개발자 서명과 프로비저닝이 필요합니다.
 
-`npm run sync:mobile`로 앱 코드를 빌드하고 두 플랫폼 프로젝트에 복사합니다. Android는 JDK 21·Android SDK 36에서 `cd android && ./gradlew assembleRelease`, iOS는 Xcode에서 App 스킴을 빌드합니다. 서명·설치 절차는 상위 `development/mobile-install-guide.md`에 있습니다.
+`npm run sync:mobile`로 앱 코드를 빌드하고 두 플랫폼 프로젝트에 복사합니다. Android는 JDK 21·Android SDK 36에서 `cd android && ./gradlew assembleDebug`로 디버그 APK를 만들 수 있습니다. iOS는 Xcode에서 App 스킴을 빌드합니다. 배포용 서명 키·인증서는 포함하지 않으며, 릴리스 배포에는 본인의 서명 설정이 필요합니다.
 
 ## 실행
 
 Node 24 권장. 이 폴더에서 `npm ci`, `npm run dev` 후 로컬 서버를 엽니다. `npm run lint`, `npm test`, `npm run build`로 검증합니다. 지도 데이터는 저장되어 있어 별도의 API 키가 필요 없습니다. 배경 지도 타일은 인터넷 연결이 필요합니다.
+
+휴대폰 앱 화면만 브라우저에서 실행하려면 `npm run dev:mobile`, 정적 앱 빌드는 `npm run build:mobile`을 사용합니다. 이 경로는 Sites 배포 계정이 없어도 사용할 수 있습니다. `.openai/hosting.json`의 프로젝트 식별자는 기존 공개 체험 배포의 설정이며 인증정보가 아닙니다. GitHub 업로드만으로 기존 체험 앱이 자동 재배포되지는 않습니다.
+
+이 저장소는 앱 소스·테스트·공개 지도 스냅샷을 포함합니다. 공모전 전체 분석 폴더, 국민조사 개인별 원자료, 개발자 환경설정, 서명 키와 빌드 산출물은 포함하지 않습니다. 아래 상위 `development/` 경로는 전체 작업공간의 자료 위치이며 이 앱 저장소에 들어 있는 파일은 아닙니다.
 
 ## 사용할 수 있는 기능
 
