@@ -29,7 +29,7 @@
 :root {
   --background: #e5eae2;
   --foreground: #192c23;
-  --paper: #f8faf7;
+  --paper: #ffffff;
   --lime: #d1f584;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -1533,7 +1533,7 @@ body:has(.embedded-app) {
   bottom: 0;
   z-index: 25;
   padding: 14px 24px calc(14px + var(--safe-bottom));
-  background: #f8faf7f5;
+  background: #fffffff5;
   border-top: 1px solid #e8eee2;
   backdrop-filter: blur(12px);
 }
