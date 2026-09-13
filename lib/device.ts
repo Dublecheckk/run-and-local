@@ -25,10 +25,10 @@ export async function currentPosition() {
   });
   if (
     !Number.isFinite(position.coords.accuracy) ||
-    position.coords.accuracy > 100
+    position.coords.accuracy > 250
   )
     throw new Error(
-      '위치 오차가 100m를 넘어요. 지도에서 출발점을 직접 선택해 주세요.',
+      '위치 오차가 250m를 넘어요. 창가나 야외에서 다시 시도하거나 지도에서 출발점을 선택해 주세요.',
     );
   return position;
 }
