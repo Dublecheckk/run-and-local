@@ -16,7 +16,6 @@ import {
   Waves,
   Building2,
   Sparkles,
-  Route,
   Search,
   Timer,
   UtensilsCrossed,
@@ -786,9 +785,13 @@ export default function RunSetup({
         ) : (
           <span />
         )}
-        <span className="wordmark">
-          RUN<span>&</span>LOCAL<span className="brand-period">.</span>
-        </span>
+        {step === 0 ? (
+          <span />
+        ) : (
+          <span className="wordmark">
+            RUN<span>&</span>LOCAL<span className="brand-period">.</span>
+          </span>
+        )}
         {onClose ? (
           <Button variant="ghost" onClick={onClose}>
             닫기
@@ -809,35 +812,22 @@ export default function RunSetup({
       )}
       <main className="setup-content">
         {step === 0 && (
-          <>
-            <div className="welcome-region-card">
-              <span className="welcome-route-line" />
-              <MapPin size={29} />
-              <strong>성수·서울숲·뚝섬</strong>
-              <small>한강과 서울숲을 이어 달려요</small>
-            </div>
-            <p className="overline">A PLACE TO GO. A REASON TO RUN.</p>
+          <div className="welcome-hero-content">
+            <span className="wordmark welcome-wordmark">
+              RUN<span>&</span>LOCAL<span className="brand-period">.</span>
+            </span>
+            <p className="welcome-region">SEOUL · SEONGSU</p>
             <h1>
               가고 싶은 곳까지,
               <br />
               나에게 맞는 길로.
             </h1>
             <p className="setup-intro">
-              오늘의 거리와 페이스, 좋아하는 길을 알려주세요. 지도와 지형을 함께
-              살펴 코스를 찾아요.
+              오늘의 목적지를 러닝으로 연결해요.
+              <br />내 거리와 페이스에 맞는 길로.
             </p>
-            <div className="welcome-features">
-              <span>
-                <Route size={18} /> 원하는 거리
-              </span>
-              <span>
-                <Trees size={18} /> 좋아하는 길
-              </span>
-              <span>
-                <Mountain size={18} /> 오르막 정도
-              </span>
-            </div>
-          </>
+            <span className="welcome-scroll-cue">A REASON TO RUN</span>
+          </div>
         )}
         {step === 1 && (
           <>
