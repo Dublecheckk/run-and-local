@@ -21,6 +21,7 @@ import {
   Timer,
   UtensilsCrossed,
   ShoppingBag,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -505,6 +506,7 @@ export default function RunSetup({
     [error, setError] = useState(''),
     [mapOpen, setMapOpen] = useState(false),
     [runKind, setRunKind] = useState<RunKind>('daily'),
+    [wantsRecommendation, setWantsRecommendation] = useState(false),
     [placeBusy, setPlaceBusy] = useState(false),
     [suggestedPlaces, setSuggestedPlaces] = useState<VerifiedPlace[]>([]),
     [placeQuery, setPlaceQuery] = useState(''),
@@ -539,6 +541,17 @@ export default function RunSetup({
     [originResults, setupRouter],
   );
   const destination = places.find((p) => p.id === form.destinationId) ?? null;
+  const chooseDestination = (patch: Partial<RouteInput>) => {
+    setWantsRecommendation(false);
+    onDestination(patch);
+  };
+  const clearDestination = () => {
+    setPlaceQuery('');
+    setSuggestedPlaces([]);
+    setSearchPlaces([]);
+    setSearchState('idle');
+    onDestination({ destinationId: '' });
+  };
   const preset = graph?.origins.find(
     (p) => 'nodeId' in form.origin && p.nodeId === form.origin.nodeId,
   );
@@ -1103,7 +1116,7 @@ export default function RunSetup({
                     itemToStringLabel={(p: Poi) => p.name}
                     isItemEqualToValue={(a, b) => a.id === b.id}
                     onValueChange={(p) => {
-                      if (p) onDestination({ destinationId: p.id });
+                      if (p) chooseDestination({ destinationId: p.id });
                     }}
                     onInputValueChange={(query) => {
                       if (query === placeQuery) return;
@@ -1152,10 +1165,28 @@ export default function RunSetup({
                     </p>
                   )}
                   {!destination && (
+                    <label className="recommendation-opt-in">
+                      <input
+                        type="checkbox"
+                        checked={wantsRecommendation}
+                        onChange={(event) => {
+                          setWantsRecommendation(event.target.checked);
+                          setSuggestedPlaces([]);
+                          setError('');
+                        }}
+                      />
+                      <span>
+                        <strong>목적지가 정해지지 않았어요.</strong>
+                        <small>오늘의 생활 미션으로 추천받고 싶어요.</small>
+                      </span>
+                      <Check
+                        className="recommendation-opt-in-check"
+                        size={18}
+                      />
+                    </label>
+                  )}
+                  {!destination && wantsRecommendation && (
                     <div className="context-recommendation">
-                      <p className="context-divider">
-                        <span>아직 목적지가 없다면</span>
-                      </p>
                       <fieldset className="run-kind-grid">
                         <legend>오늘의 생활 미션</legend>
                         {Object.entries(RUN_KINDS).map(([key, item]) => {
@@ -1221,7 +1252,7 @@ export default function RunSetup({
                           key={p.id}
                           className="destination-card"
                           onClick={() =>
-                            onDestination({
+                            chooseDestination({
                               destinationId: p.id,
                               ...(p.adjustment
                                 ? { theme: 'any', scenery: 'any' }
@@ -1282,7 +1313,15 @@ export default function RunSetup({
                       </small>
                       <strong>{destination.name}</strong>
                     </span>
-                    <Check size={19} />
+                    <button
+                      type="button"
+                      className="clear-destination"
+                      aria-label="목적지 선택 해제"
+                      onClick={clearDestination}
+                    >
+                      <X size={16} />
+                      <span>선택 해제</span>
+                    </button>
                   </div>
                 )}
                 <p className="field-help">

@@ -1977,7 +1977,60 @@ body:has(.embedded-app) {
   color: #667064;
 }
 .context-recommendation {
-  margin-top: 24px;
+  margin-top: 14px;
+}
+.recommendation-opt-in {
+  display: flex !important;
+  align-items: center;
+  gap: 12px !important;
+  margin-top: 16px;
+  padding: 15px 16px;
+  border: 1px solid #dfe7d8;
+  border-radius: 16px;
+  background: #f8faf5;
+  color: #294033;
+  cursor: pointer;
+}
+.recommendation-opt-in input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.recommendation-opt-in > span {
+  flex: 1;
+}
+.recommendation-opt-in strong,
+.recommendation-opt-in small {
+  display: block;
+}
+.recommendation-opt-in strong {
+  font-size: 14px;
+}
+.recommendation-opt-in small {
+  margin-top: 3px;
+  color: #7c8976;
+  font-size: 11px;
+  font-weight: 500;
+}
+.recommendation-opt-in-check {
+  padding: 3px;
+  border: 1px solid #aebba5;
+  border-radius: 6px;
+  color: transparent;
+}
+.recommendation-opt-in:has(input:checked) {
+  border-color: #66834f;
+  background: #eef5e5;
+}
+.recommendation-opt-in:has(input:focus-visible) {
+  outline: 2px solid #315842;
+  outline-offset: 2px;
+}
+.recommendation-opt-in:has(input:checked) .recommendation-opt-in-check {
+  border-color: #52713f;
+  background: #52713f;
+  color: #fff;
 }
 .context-divider {
   display: flex;
@@ -2186,6 +2239,19 @@ body:has(.embedded-app) {
 }
 .setup-destination small {
   font-size: 12px;
+}
+.clear-destination {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 9px;
+  background: rgb(255 255 255 / 70%);
+  color: #60735b;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
 }
 .setup-loading {
   padding: 30px 0;
