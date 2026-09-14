@@ -1,9 +1,51 @@
 import assert from 'node:assert/strict';
 import {
   finalDestinationScore,
+  missionMenuForProfile,
   rankDestinations,
+  RUN_KINDS,
   type PlaceCandidate,
 } from '../lib/destination-recommender.ts';
+import {
+  DEFAULT_PROFILE,
+  parseProfile,
+  type RunnerProfile,
+} from '../lib/profile.ts';
+
+for (const sex of ['F', 'M'] as const) {
+  for (const ageGroup of ['20', '30', '40', '50', '60'] as const) {
+    const menu = missionMenuForProfile({ sex, ageGroup });
+    const clusterId =
+      sex === 'F' ? (ageGroup === '20' ? 0 : 1) : ageGroup === '20' ? 2 : 3;
+    const expected = [
+      ['daily'],
+      ['shopping'],
+      ['evening'],
+      ['daily', 'shopping'],
+    ][clusterId];
+    assert.equal(menu.clusterId, clusterId);
+    assert.deepEqual(menu.suggestedKinds, expected);
+    assert.deepEqual(menu.kinds.slice(0, expected.length), expected);
+    assert.deepEqual(
+      [...menu.kinds].sort(),
+      Object.keys(RUN_KINDS).sort(),
+      'every mission stays available exactly once',
+    );
+  }
+}
+for (const profile of [
+  DEFAULT_PROFILE,
+  { sex: 'F', ageGroup: 'unspecified' },
+  { sex: 'unspecified', ageGroup: '20' },
+  parseProfile(
+    JSON.stringify({ ...DEFAULT_PROFILE, sex: 'other', ageGroup: '70' }),
+  ),
+] as RunnerProfile[]) {
+  const menu = missionMenuForProfile(profile);
+  assert.equal(menu.clusterId, null);
+  assert.deepEqual(menu.suggestedKinds, []);
+  assert.deepEqual(menu.kinds, ['daily', 'shopping', 'evening', 'culture']);
+}
 
 const places: PlaceCandidate[] = [
   {
