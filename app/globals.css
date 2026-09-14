@@ -2642,3 +2642,90 @@ body:has(.embedded-app) {
   color: var(--lime);
   flex-shrink: 0;
 }
+
+.region-options {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+.region-options > button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 42px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid #dfe6da;
+  border-radius: 18px;
+  background: #fff;
+  color: #183329;
+  text-align: left;
+}
+.region-options > button.selected {
+  border-color: #86a768;
+  background: #f2f7e8;
+}
+.region-options > button > span:first-child {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: #eaf1df;
+  color: #577d42;
+}
+.region-options strong,
+.region-options small {
+  display: block;
+}
+.region-options strong {
+  font-size: 15px;
+}
+.region-options small {
+  margin-top: 4px;
+  color: #778474;
+  font-size: 11px;
+}
+.welcome-region-card {
+  position: relative;
+  min-height: 176px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  overflow: hidden;
+  border-radius: 26px;
+  background: linear-gradient(145deg, #dceec7, #b8dcce 54%, #a8d4e4);
+  color: #183b2d;
+}
+.welcome-region-card svg {
+  position: relative;
+  z-index: 1;
+  padding: 8px;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: #fff;
+  color: #568243;
+  box-shadow: 0 8px 22px #345c4530;
+}
+.welcome-region-card strong,
+.welcome-region-card small {
+  position: relative;
+  z-index: 1;
+}
+.welcome-region-card strong {
+  font-size: 19px;
+}
+.welcome-region-card small {
+  color: #456554;
+}
+.welcome-route-line {
+  position: absolute;
+  width: 130%;
+  height: 70px;
+  border: 4px solid #ffffffa8;
+  border-radius: 50%;
+  transform: rotate(-12deg);
+}
