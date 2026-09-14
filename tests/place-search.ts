@@ -6,14 +6,13 @@ function press({
   key = 'Enter',
   active = false,
   composing = false,
-  keyCode = 13,
   expanded = true,
   hasResult = true,
 } = {}) {
   const actual = { clicked: false, prevented: false, basePrevented: false };
   const event = {
     key,
-    nativeEvent: { isComposing: composing, keyCode },
+    nativeEvent: { isComposing: composing },
     preventDefault: () => {
       actual.prevented = true;
     },
@@ -75,7 +74,7 @@ assert.deepEqual(press({ key: 'ArrowDown' }), {
   prevented: false,
   basePrevented: false,
 });
-for (const ime of [{ composing: true }, { keyCode: 229 }])
+for (const ime of [{ composing: true }])
   assert.deepEqual(press(ime), {
     clicked: false,
     prevented: false,

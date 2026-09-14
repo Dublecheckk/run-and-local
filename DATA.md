@@ -1,4 +1,16 @@
-이 문서는 상위 `development/data/`의 데이터 생성 기록입니다. 배포 앱의 가공 데이터는 `public/data/gangneung.json`이며 `/data/gangneung.json`에서 다운로드할 수 있습니다. 아래 재현 명령과 원본 파일 목록은 공모전 전체 작업 폴더를 기준으로 합니다.
+이 문서는 배포 앱의 가공 지도 데이터 생성 기록입니다. 현재 `public/data/gangneung.json`과 `public/data/seongsu.json`을 지역별로 사용합니다.
+
+# 성수·서울숲·뚝섬 실증권역
+
+- 범위: `[127.020, 37.510, 127.105, 37.575]`(서·남·동·북). 성수·서울숲·뚝섬을 핵심으로 한강 남·북단과 교량 연결을 포함합니다.
+- 그래프: 노드 45,145개, 구간 53,371개, 최대 연결요소 44,238개. 출발 기준점 6곳을 포함합니다.
+- 고도는 아직 결합하지 않았으며, 물·녹지 테마는 OSM 도형 근접거리와 도로 태그의 추정값입니다.
+
+```sh
+python3 scripts/fetch-region-osm.py --config scripts/data/seongsu-region.json --kind roads --output /tmp/seongsu-roads.json
+python3 scripts/fetch-region-osm.py --config scripts/data/seongsu-region.json --kind features --output /tmp/seongsu-features.json
+python3 scripts/build-region-graph.py --config scripts/data/seongsu-region.json --roads /tmp/seongsu-roads.json --features /tmp/seongsu-features.json --output public/data/seongsu.json
+```
 
 # 실제 강릉 추천용 OpenStreetMap 데이터
 
@@ -65,19 +77,18 @@ python3 running_challenge_20260912/development/data/fetch_osm.py
 
 ## 파일
 
-| 파일 | 역할 |
-|---|---|
-| `osm_raw.json` | Overpass 응답 그대로, 재현의 원본 |
-| `fetch_metadata.json` | 정확한 요청·날짜·API·원본 SHA256 |
-| `gangneung_graph.json` | 앱에서 사용하는 nodes/edges/pois/origins/features/metadata |
-| `build_summary.json` | 가공 후 수량·지역 출발점·풍경 요약 |
-| `excluded_pois.json` | 100m 연결거리 기준으로 제외한 장소 |
-| `fetch_osm.py` / `build_graph.py` | 수집 / 정제·검사 |
+| 파일                              | 역할                                                       |
+| --------------------------------- | ---------------------------------------------------------- |
+| `osm_raw.json`                    | Overpass 응답 그대로, 재현의 원본                          |
+| `fetch_metadata.json`             | 정확한 요청·날짜·API·원본 SHA256                           |
+| `gangneung_graph.json`            | 앱에서 사용하는 nodes/edges/pois/origins/features/metadata |
+| `build_summary.json`              | 가공 후 수량·지역 출발점·풍경 요약                         |
+| `excluded_pois.json`              | 100m 연결거리 기준으로 제외한 장소                         |
+| `fetch_osm.py` / `build_graph.py` | 수집 / 정제·검사                                           |
 
 `features[].geometry`는 GeoJSON Polygon 또는 LineString 형식이며 원본 관계형 도형의 member를 그대로 나눈 것이므로 완전한 해안·육지 채움용 데이터는 아닙니다. 경로 선은 `edges`와 `nodes`를 연결하여 그립니다.
 
 태그 해석 출처: [foot](https://wiki.openstreetmap.org/wiki/Key:foot), [oneway:foot](https://wiki.openstreetmap.org/wiki/Key:oneway:foot). 데이터 라이선스 출처: [OpenStreetMap copyright](https://www.openstreetmap.org/copyright).
-
 
 ## 지형 보강 (앱 1.1)
 

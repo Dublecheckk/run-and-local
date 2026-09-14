@@ -63,6 +63,7 @@ import {
 } from '@/components/ui/dialog';
 import {
   createRouter,
+  MAX_ORIGIN_GAP_METERS,
   type Coordinate,
   type GraphData,
   type Poi,
@@ -113,6 +114,21 @@ interface LocalGraph extends GraphData {
     terrain?: { dem: { attribution: string; licenseUrl: string } };
   };
 }
+const regions = {
+  seongsu: {
+    city: '서울',
+    name: '성수·서울숲·뚝섬',
+    dataUrl: '/data/seongsu.json',
+    defaultTheme: 'river' as const,
+  },
+  gangneung: {
+    city: '강릉',
+    name: '강릉 전역',
+    dataUrl: '/data/gangneung.json',
+    defaultTheme: 'coast' as const,
+  },
+};
+type RegionId = keyof typeof regions;
 const categories: Record<string, string> = {
   cafe: '카페',
   restaurant: '식당',
@@ -151,6 +167,8 @@ const defaults: RouteInput = {
 };
 const formatKm = (meters: number) => (meters / 1000).toFixed(2);
 export default function RunApp() {
+  const [regionId, setRegionId] = useState<RegionId>('seongsu');
+  const region = regions[regionId];
   const [graph, setGraph] = useState<LocalGraph | null>(null),
     [loadError, setLoadError] = useState('');
   const [form, setForm] = useState<RouteInput>(defaults),
@@ -183,9 +201,9 @@ export default function RunApp() {
     [actualKm, setActualKm] = useState(''),
     [actualMinutes, setActualMinutes] = useState(''),
     [finishError, setFinishError] = useState('');
-  const [sheet, setSheet] = useState<'settings' | 'place' | 'about' | null>(
-    null,
-  );
+  const [sheet, setSheet] = useState<
+    'settings' | 'place' | 'about' | 'region' | null
+  >(null);
   const [session, setSession] = useState<RunSession | null>(null),
     [now, setNow] = useState(0),
     [sessionError, setSessionError] = useState('');
@@ -232,9 +250,20 @@ export default function RunApp() {
     return () => clearTimeout(timer);
   }, [notice]);
   const router = useMemo(() => (graph ? createRouter(graph) : null), [graph]);
+  const originSupport = useMemo(
+    () =>
+      new Map(
+        originSearchResults.map((place) => [
+          place.id,
+          (router?.snap(place)?.distanceMeters ?? Infinity) <=
+            MAX_ORIGIN_GAP_METERS,
+        ]),
+      ),
+    [originSearchResults, router],
+  );
   useEffect(() => {
     const abort = new AbortController();
-    fetch('/data/gangneung.json', { signal: abort.signal })
+    fetch(region.dataUrl, { signal: abort.signal })
       .then((r) => {
         if (!r.ok) throw new Error('지도 데이터 다운로드에 실패했습니다.');
         return r.json();
@@ -245,6 +274,21 @@ export default function RunApp() {
         if (!Array.isArray(map.origins) || !map.origins.length)
           throw new Error('출발점 데이터가 없습니다.');
         setGraph(map);
+        const first = map.origins[0];
+        setForm((current) => {
+          const next: RouteInput = {
+            ...current,
+            origin: { nodeId: first.nodeId },
+            destinationId: '',
+            theme: region.defaultTheme,
+            scenery: 'water',
+          };
+          setSubmitted(next);
+          return next;
+        });
+        setOriginLabel(first.name);
+        setResult(null);
+        setDirty(true);
       })
       .catch((e) => {
         if (e.name !== 'AbortError')
@@ -252,6 +296,9 @@ export default function RunApp() {
             '지도를 불러오지 못했습니다. 연결을 확인하고 새로고침해 주세요.',
           );
       });
+    return () => abort.abort();
+  }, [region.dataUrl, region.defaultTheme]);
+  useEffect(() => {
     void Promise.resolve().then(() => {
       try {
         setRecords(parseRecords(localStorage.getItem(RECORD_KEY)));
@@ -271,8 +318,25 @@ export default function RunApp() {
         );
       }
     });
-    return () => abort.abort();
   }, []);
+
+  function selectRegion(nextRegionId: RegionId) {
+    if (nextRegionId === regionId) {
+      setSheet(null);
+      return;
+    }
+    computeId.current++;
+    setBusy(false);
+    setGraph(null);
+    setLoadError('');
+    setRegionId(nextRegionId);
+    setPlaceQuery('');
+    setOriginQuery('');
+    setPlaceSearchResults([]);
+    setOriginSearchResults([]);
+    setSheet(null);
+    setNotice(`${regions[nextRegionId].name} 지도로 바꿨어요.`);
+  }
   function update(patch: Partial<RouteInput>) {
     setDestinationRequest(null);
     setPreviewOpen(false);
@@ -308,8 +372,17 @@ export default function RunApp() {
     update({ origin });
   }
   function selectOriginPlace(place: PlaceCandidate) {
+    if (!originSupport.get(place.id)) {
+      setNotice(
+        `${place.name}은(는) ${region.name} 지원 도로망 밖이에요. ‘지원 가능’ 장소를 골라주세요.`,
+      );
+      return;
+    }
     setOriginQuery(place.name);
     selectOrigin({ lon: place.lon, lat: place.lat }, place.name);
+  }
+  function isSupportedOrigin(place: PlaceCandidate) {
+    return originSupport.get(place.id) === true;
   }
   const mergePlaces = useCallback((places: PlaceCandidate[]) => {
     setGraph((current) =>
@@ -653,6 +726,7 @@ export default function RunApp() {
       <>
         <RunSetup
           key={setupStep}
+          cityName={region.city}
           initialStep={setupStep}
           graph={graph}
           profile={draftProfile}
@@ -706,8 +780,8 @@ export default function RunApp() {
             >
               RUN<span>&</span>LOCAL<span className="brand-period">.</span>
             </button>
-            <button className="city-switch" onClick={() => setSheet('about')}>
-              <span /> 강릉 <ChevronDown size={15} />
+            <button className="city-switch" onClick={() => setSheet('region')}>
+              <span /> {region.city} <ChevronDown size={15} />
             </button>
           </header>
           <Tabs
@@ -729,7 +803,7 @@ export default function RunApp() {
                 <div className="loading-screen">
                   <span className="loading-orbit" />
                   <h1>달릴 길을 찾고 있어요</h1>
-                  <p>강릉의 실제 지도와 연결 중</p>
+                  <p>{region.name}의 실제 지도와 연결 중</p>
                 </div>
               ) : (
                 <>
@@ -1020,7 +1094,7 @@ export default function RunApp() {
                 <p>
                   목적지 하나씩,
                   <br />
-                  나만의 강릉을 채워가요.
+                  나만의 {region.city}을 채워가요.
                 </p>
               </div>
               <div className="section-line">
@@ -1050,7 +1124,7 @@ export default function RunApp() {
                         {String(i + 1).padStart(2, '0')}
                       </span>
                       <div>
-                        <small>강릉 · 저장한 코스</small>
+                        <small>저장한 러닝 코스</small>
                         <h3>{r.destination}</h3>
                         <p>
                           {formatKm(r.plannedMeters)} km <span>·</span> 약{' '}
@@ -1407,9 +1481,21 @@ export default function RunApp() {
                         </ComboboxEmpty>
                         <ComboboxList>
                           {(place: PlaceCandidate) => (
-                            <ComboboxItem key={place.id} value={place}>
+                            <ComboboxItem
+                              key={place.id}
+                              value={place}
+                              className={
+                                isSupportedOrigin(place)
+                                  ? 'supported-place'
+                                  : 'unsupported-place'
+                              }
+                            >
                               {place.name}
-                              <small className="place-category">카카오맵</small>
+                              <small className="place-category">
+                                {isSupportedOrigin(place)
+                                  ? '지원 가능'
+                                  : '지원 권역 밖'}
+                              </small>
                             </ComboboxItem>
                           )}
                         </ComboboxList>
@@ -1569,6 +1655,49 @@ export default function RunApp() {
               </p>
             </>
           )}
+          {sheet === 'region' && (
+            <>
+              <DialogTitle>달릴 지역 선택</DialogTitle>
+              <DialogDescription>
+                지역별 도로망을 필요할 때만 불러와요.
+              </DialogDescription>
+              <div className="region-options">
+                {(
+                  Object.entries(regions) as [
+                    RegionId,
+                    (typeof regions)[RegionId],
+                  ][]
+                ).map(([id, item]) => (
+                  <button
+                    key={id}
+                    className={regionId === id ? 'selected' : ''}
+                    onClick={() => selectRegion(id)}
+                    aria-pressed={regionId === id}
+                  >
+                    <span>
+                      <MapPin size={20} />
+                    </span>
+                    <span>
+                      <strong>{item.name}</strong>
+                      <small>
+                        {id === 'seongsu'
+                          ? '성수·서울숲·뚝섬 실증권역'
+                          : '기존 강릉 서비스 권역'}
+                      </small>
+                    </span>
+                    {regionId === id ? (
+                      <Check size={19} />
+                    ) : (
+                      <ChevronRight size={19} />
+                    )}
+                  </button>
+                ))}
+              </div>
+              <p className="field-help">
+                지역을 바꾸면 출발점과 목적지를 새 지도에 맞게 다시 설정해요.
+              </p>
+            </>
+          )}
           {sheet === 'about' && (
             <>
               <DialogTitle>내 코스의 추천 이유</DialogTitle>
@@ -1597,12 +1726,20 @@ export default function RunApp() {
                 </div>
               )}
               <div className="about-section">
-                <h2>강릉 시범지역</h2>
-                <p>
-                  경포·초당·송정·안목의 실제 지도 구간에서 코스를 계산해요.
-                  경사는 공개 지표면 고도의 추정값이에요. 실제 도로
-                  경사·공사·현장 통행과 상점 입구는 확인되지 않았어요.
-                </p>
+                <h2>{region.name} 시범지역</h2>
+                {regionId === 'seongsu' ? (
+                  <p>
+                    성수·서울숲·뚝섬과 한강 남·북단 연결 구간의 OSM 보행
+                    도로망에서 코스를 계산해요. 현재 고도·경사는 미확인이며,
+                    실제 공사·현장 통행과 상점 입구는 방문 전 확인해야 해요.
+                  </p>
+                ) : (
+                  <p>
+                    강릉 전역의 실제 지도 구간에서 코스를 계산해요. 경사는 공개
+                    지표면 고도의 추정값이에요. 실제 도로 경사·공사·현장 통행과
+                    상점 입구는 확인되지 않았어요.
+                  </p>
+                )}
                 <h2>규칙 기반 추천</h2>
                 <p>
                   목표 거리·테마·경사·노면을 경로 탐색과 순위 계산에 반영해요.
@@ -1612,12 +1749,19 @@ export default function RunApp() {
                   아니에요.
                 </p>
                 <h2>고도·경사 데이터</h2>
-                <p>
-                  Copernicus GLO-30 지표면 모델을 평활화하고 60m 이상 간격으로
-                  경사를 추정해요. 수목·건물이 포함되며 실제 도로의 순간 최대
-                  경사는 아니에요. 교량·터널·계단은 경사 미확인으로 남겨요. 상승
-                  100m당 2분의 계획 여유는 설계 가정이에요.
-                </p>
+                {regionId === 'gangneung' ? (
+                  <p>
+                    Copernicus GLO-30 지표면 모델을 평활화하고 60m 이상 간격으로
+                    경사를 추정해요. 수목·건물이 포함되며 실제 도로의 순간 최대
+                    경사는 아니에요. 교량·터널·계단은 경사 미확인으로 남겨요.
+                  </p>
+                ) : (
+                  <p>
+                    성수 실증판은 고도 데이터를 아직 결합하지 않아 경사를
+                    ‘미확인’으로 표시해요. 경사 선호는 고도 결합 후 정밀하게
+                    반영할 예정이에요.
+                  </p>
+                )}
                 {graph?.metadata.terrain && (
                   <p className="dem-attribution">
                     <a
@@ -1640,10 +1784,9 @@ export default function RunApp() {
                 </p>
                 <h2>데이터 출처</h2>
                 <p>
-                  지도 기준 2026.09.12 · © OpenStreetMap contributors · ODbL
-                  1.0. 배경지도는 OSM 서버에서 불러와요. 2025 국민여가활동조사의
-                  러닝 경험률 13.63%는 서비스 배경이며 앱 효과를 입증하지
-                  않아요.
+                  지도 기준 2026.09 · © OpenStreetMap contributors · ODbL 1.0.
+                  배경지도는 OSM 서버에서 불러와요. 2025 국민여가활동조사의 러닝
+                  경험률 13.63%는 서비스 배경이며 앱 효과를 입증하지 않아요.
                 </p>
                 <a
                   href="https://www.openstreetmap.org/copyright"
@@ -1652,13 +1795,15 @@ export default function RunApp() {
                 >
                   지도 출처·라이선스 ↗
                 </a>
-                <a
-                  href="https://commons.wikimedia.org/wiki/File:Gangmun_Beach_20220502_004.jpg"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  강문해변 사진: Mobius6 · CC BY-SA 4.0 ↗
-                </a>
+                {regionId === 'gangneung' && (
+                  <a
+                    href="https://commons.wikimedia.org/wiki/File:Gangmun_Beach_20220502_004.jpg"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    강문해변 사진: Mobius6 · CC BY-SA 4.0 ↗
+                  </a>
+                )}
               </div>
             </>
           )}

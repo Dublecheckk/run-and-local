@@ -6,7 +6,7 @@ export const handlePlaceSearchEnter: NonNullable<
   Combobox.Input.Props['onKeyDown']
 > = (event) => {
   if (event.key !== 'Enter') return;
-  if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
+  if (event.nativeEvent.isComposing) {
     event.preventBaseUIHandler();
     return;
   }

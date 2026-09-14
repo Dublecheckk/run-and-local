@@ -4,7 +4,7 @@ import BackButton from './back-button';
 
 import { handlePlaceSearchEnter } from '@/lib/place-search';
 /* oxlint-disable next/no-img-element -- The same local assets run inside the native app. */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight,
   Camera,
@@ -44,6 +44,7 @@ import {
   HILL_PREFERENCES,
   HILL_LIMITS,
   createRouter,
+  MAX_ORIGIN_GAP_METERS,
   validateRouteInput,
   type GraphData,
   type Poi,
@@ -100,7 +101,7 @@ const runKindPresentation = {
   },
   sightseeing: {
     icon: Camera,
-    prompt: '강릉의 장면을 향해',
+    prompt: '도시의 장면을 향해',
   },
 } as const;
 
@@ -460,6 +461,7 @@ export function RunPreferences({
 }
 
 export default function RunSetup({
+  cityName,
   graph,
   profile,
   form,
@@ -477,6 +479,7 @@ export default function RunSetup({
   onOriginLabel,
   initialStep = 0,
 }: {
+  cityName: string;
   graph: SetupGraph | null;
   profile: RunnerProfile;
   form: RouteInput;
@@ -514,6 +517,21 @@ export default function RunSetup({
         ['cafe', 'restaurant', 'park', 'attraction'].includes(p.category),
       )
       .sort((a, b) => a.name.localeCompare(b.name, 'ko')) ?? [];
+  const setupRouter = useMemo(
+    () => (graph ? createRouter(graph) : null),
+    [graph],
+  );
+  const originSupport = useMemo(
+    () =>
+      new Map(
+        originResults.map((place) => [
+          place.id,
+          (setupRouter?.snap(place)?.distanceMeters ?? Infinity) <=
+            MAX_ORIGIN_GAP_METERS,
+        ]),
+      ),
+    [originResults, setupRouter],
+  );
   const destination = places.find((p) => p.id === form.destinationId) ?? null;
   const preset = graph?.origins.find(
     (p) => 'nodeId' in form.origin && p.nodeId === form.origin.nodeId,
@@ -601,6 +619,13 @@ export default function RunSetup({
           ? fallbackPlaces
           : [];
   function chooseOrigin(place: PlaceCandidate) {
+    if (!originSupport.get(place.id)) {
+      setError(
+        `${place.name}은(는) 현재 지원 도로망 밖이에요. ‘지원 가능’ 장소를 골라주세요.`,
+      );
+      return;
+    }
+    setError('');
     onOriginLabel(place.name);
     setOriginQuery(place.name);
     update({ origin: { lon: place.lon, lat: place.lat } });
@@ -754,12 +779,21 @@ export default function RunSetup({
       <main className="setup-content">
         {step === 0 && (
           <>
-            <div className="welcome-photo">
-              <img src="/images/gangmun-beach.jpg" alt="강문해변의 바다" />
-              <span>
-                <MapPin size={14} /> 강릉에서 시작해요
-              </span>
-            </div>
+            {cityName === '강릉' ? (
+              <div className="welcome-photo">
+                <img src="/images/gangmun-beach.jpg" alt="강문해변의 바다" />
+                <span>
+                  <MapPin size={14} /> 강릉에서 시작해요
+                </span>
+              </div>
+            ) : (
+              <div className="welcome-region-card">
+                <span className="welcome-route-line" />
+                <MapPin size={29} />
+                <strong>성수·서울숲·뚝섬</strong>
+                <small>한강과 서울숲을 이어 달려요</small>
+              </div>
+            )}
             <p className="overline">A PLACE TO GO. A REASON TO RUN.</p>
             <h1>
               가고 싶은 곳까지,
@@ -781,14 +815,16 @@ export default function RunSetup({
                 <Mountain size={18} /> 오르막 정도
               </span>
             </div>
-            <a
-              className="photo-credit"
-              href="https://commons.wikimedia.org/wiki/File:Gangmun_Beach_20220502_004.jpg"
-              target="_blank"
-              rel="noreferrer"
-            >
-              강문해변 사진 · Mobius6 · CC BY-SA 4.0 ↗
-            </a>
+            {cityName === '강릉' && (
+              <a
+                className="photo-credit"
+                href="https://commons.wikimedia.org/wiki/File:Gangmun_Beach_20220502_004.jpg"
+                target="_blank"
+                rel="noreferrer"
+              >
+                강문해변 사진 · Mobius6 · CC BY-SA 4.0 ↗
+              </a>
+            )}
           </>
         )}
         {step === 1 && (
@@ -877,7 +913,7 @@ export default function RunSetup({
             <RunTargetDistance form={form} update={update} />
             {!graph ? (
               <p className="setup-loading">
-                {loadError || '강릉의 장소를 불러오고 있어요…'}
+                {loadError || `${cityName}의 장소를 불러오고 있어요…`}
               </p>
             ) : (
               <>
@@ -949,9 +985,21 @@ export default function RunSetup({
                       </ComboboxEmpty>
                       <ComboboxList>
                         {(place: PlaceCandidate) => (
-                          <ComboboxItem key={place.id} value={place}>
+                          <ComboboxItem
+                            key={place.id}
+                            value={place}
+                            className={
+                              originSupport.get(place.id)
+                                ? 'supported-place'
+                                : 'unsupported-place'
+                            }
+                          >
                             {place.name}
-                            <small className="place-category">카카오맵</small>
+                            <small className="place-category">
+                              {originSupport.get(place.id)
+                                ? '지원 가능'
+                                : '지원 권역 밖'}
+                            </small>
                           </ComboboxItem>
                         )}
                       </ComboboxList>
@@ -1185,8 +1233,8 @@ export default function RunSetup({
                   </div>
                 )}
                 <p className="field-help">
-                  카카오맵의 강릉 장소를 검색해요. 저장된 {places.length}곳은
-                  API 연결 실패 시에만 보조 검색에 사용해요.
+                  카카오맵의 {cityName} 장소를 검색해요. 저장된 {places.length}
+                  곳은 API 연결 실패 시에만 보조 검색에 사용해요.
                 </p>
               </>
             )}
