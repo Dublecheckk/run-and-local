@@ -99,7 +99,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: var(--paper);
+  background: #eff7e6;
+  border-bottom: 1px solid #dfead4;
   position: sticky;
   top: 0;
   z-index: 20;
@@ -125,7 +126,9 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  background: #ecf0e7;
+  background: #fff;
+  border: 1px solid #dce7d2;
+  box-shadow: 0 3px 10px rgb(46 72 40 / 5%);
   border-radius: 20px;
   padding: 8px 11px;
   font-size: 13px;
