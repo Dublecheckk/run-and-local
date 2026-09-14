@@ -13,6 +13,7 @@ import {
   Building2,
   Sparkles,
   Route,
+  Search,
   Timer,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -880,8 +881,12 @@ export default function RunSetup({
                     <ComboboxInput
                       aria-label="출발 장소 검색"
                       placeholder="카카오맵에서 출발 장소 검색"
-                    />
-                    <ComboboxContent>
+                      showTrigger={false}
+                      className="search-field"
+                    >
+                      <Search aria-hidden size={18} />
+                    </ComboboxInput>
+                    <ComboboxContent className="search-results">
                       <ComboboxEmpty>
                         {originSearchBusy
                           ? '카카오맵에서 찾는 중…'
@@ -1024,8 +1029,12 @@ export default function RunSetup({
                       aria-label="목적지 검색"
                       id="setup-destination-search"
                       placeholder="카페·식당·공원 이름 검색"
-                    />
-                    <ComboboxContent>
+                      showTrigger={false}
+                      className="search-field"
+                    >
+                      <Search aria-hidden size={18} />
+                    </ComboboxInput>
+                    <ComboboxContent className="search-results">
                       <ComboboxEmpty>
                         {searchState === 'loading'
                           ? '카카오맵에서 찾는 중…'

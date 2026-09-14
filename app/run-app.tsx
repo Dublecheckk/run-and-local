@@ -30,6 +30,7 @@ import {
   LocateFixed,
   MapPin,
   Route as RouteIcon,
+  Search,
   Timer,
   Maximize,
 } from 'lucide-react';
@@ -1314,8 +1315,12 @@ export default function RunApp() {
                       <ComboboxInput
                         aria-label="출발 장소 검색"
                         placeholder="카카오맵에서 출발 장소 검색"
-                      />
-                      <ComboboxContent>
+                        showTrigger={false}
+                        className="search-field"
+                      >
+                        <Search aria-hidden size={18} />
+                      </ComboboxInput>
+                      <ComboboxContent className="search-results">
                         <ComboboxEmpty>
                           {originSearchBusy
                             ? '카카오맵에서 찾는 중…'
@@ -1410,9 +1415,12 @@ export default function RunApp() {
                 <ComboboxInput
                   aria-label="목적지 이름 검색"
                   placeholder="카페, 식당, 공원 검색"
-                  className="place-search"
-                />
-                <ComboboxContent>
+                  showTrigger={false}
+                  className="search-field place-search"
+                >
+                  <Search aria-hidden size={18} />
+                </ComboboxInput>
+                <ComboboxContent className="search-results">
                   <ComboboxEmpty>
                     {placeSearchState === 'loading'
                       ? '카카오맵에서 검색하고 있어요…'
