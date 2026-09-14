@@ -3,11 +3,15 @@ export type RunnerProfile = {
   nickname: string;
   experience: 'beginner' | 'regular' | 'experienced';
   paceMinKm: number;
+  sex: 'F' | 'M' | 'unspecified';
+  ageGroup: '20' | '30' | '40' | '50' | '60' | 'unspecified';
 };
 export const DEFAULT_PROFILE: RunnerProfile = {
   nickname: '',
   experience: 'beginner',
   paceMinKm: 7,
+  sex: 'unspecified',
+  ageGroup: 'unspecified',
 };
 export function parseProfile(raw: string | null): RunnerProfile | null {
   if (raw === null) return null;
@@ -31,6 +35,15 @@ export function parseProfile(raw: string | null): RunnerProfile | null {
     nickname: p.nickname.trim(),
     experience: p.experience as RunnerProfile['experience'],
     paceMinKm: p.paceMinKm,
+    sex:
+      'sex' in p && ['F', 'M'].includes(String(p.sex))
+        ? (p.sex as RunnerProfile['sex'])
+        : 'unspecified',
+    ageGroup:
+      'ageGroup' in p &&
+      ['20', '30', '40', '50', '60'].includes(String(p.ageGroup))
+        ? (p.ageGroup as RunnerProfile['ageGroup'])
+        : 'unspecified',
   };
 }
 

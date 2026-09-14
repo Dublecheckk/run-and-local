@@ -8,20 +8,22 @@ import {
 const places: PlaceCandidate[] = [
   {
     id: 'near',
-    name: '가까운 카페',
+    name: '가까운 식당',
     lon: 128.91,
     lat: 37.8,
     category: 'cafe',
+    destinationType: 'MEAL',
     source: 'kakao',
   },
   {
     id: 'fit',
-    name: '맞춤 카페',
+    name: '맞춤 식당',
     lon: 128.92,
     lat: 37.8,
     category: 'cafe',
-    categoryDetail: '음식점 > 카페',
-    address: '강릉시',
+    destinationType: 'MEAL',
+    categoryDetail: '음식점 > 한식',
+    address: '서울 성동구',
     phone: '033',
     source: 'kakao',
   },
@@ -31,12 +33,13 @@ const places: PlaceCandidate[] = [
     lon: 128.92,
     lat: 37.8,
     category: 'restaurant',
+    destinationType: 'SHOPPING',
     source: 'kakao',
   },
 ];
 const ranked = rankDestinations({
   origin: [128.9, 37.8],
-  kind: 'coffee',
+  kind: 'evening',
   targetDistanceKm: 4,
   maxDistanceKm: 6,
   minutes: 50,
@@ -46,11 +49,12 @@ const ranked = rankDestinations({
   places,
 });
 assert(ranked.length === 2);
-assert(ranked.every((p) => p.category === 'cafe'));
+assert(ranked.every((p) => p.destinationType === 'MEAL'));
 assert.equal(ranked[0].id, 'fit');
 assert(ranked[0].score >= ranked[1].score);
 
 const originalScore = finalDestinationScore(80, 90);
 assert.equal(finalDestinationScore(80, 90, 'theme'), originalScore - 8);
 assert.equal(finalDestinationScore(80, 90, 'out_and_back'), originalScore - 15);
+assert.equal(finalDestinationScore(80, 90, undefined, 1), originalScore + 5);
 console.log('Destination recommender checks passed.');

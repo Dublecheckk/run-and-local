@@ -23,7 +23,6 @@ import {
   X,
   Activity,
   Compass,
-  Smartphone,
   Share2,
   ArrowUpRight,
   Check,
@@ -89,6 +88,12 @@ import {
   type RunnerProfile,
 } from '@/lib/profile';
 import type { PlaceCandidate } from '@/lib/destination-recommender';
+import {
+  DESTINATION_TYPE_LABELS,
+  missionLabelForDestinationType,
+  type DestinationType,
+  type MissionContextId,
+} from '@/lib/destination-context';
 import DestinationChoice, {
   type DestinationRequest,
 } from './destination-choice';
@@ -98,6 +103,11 @@ type LocalPoi = Poi & {
   address?: string | null;
   osmUrl: string;
   source?: 'kakao' | 'osm';
+  destinationType?: DestinationType;
+  missionContextId?: MissionContextId;
+  missionLabel?: string;
+  contextPrior?: number;
+  routeEligible?: boolean;
 };
 interface LocalGraph extends GraphData {
   pois: LocalPoi[];
@@ -114,32 +124,23 @@ interface LocalGraph extends GraphData {
     terrain?: { dem: { attribution: string; licenseUrl: string } };
   };
 }
-const regions = {
-  seongsu: {
-    city: '서울',
-    name: '성수·서울숲·뚝섬',
-    dataUrl: '/data/seongsu.json',
-    defaultTheme: 'river' as const,
-  },
-  gangneung: {
-    city: '강릉',
-    name: '강릉 전역',
-    dataUrl: '/data/gangneung.json',
-    defaultTheme: 'coast' as const,
-  },
+const region = {
+  city: '서울',
+  name: '성수·서울숲·뚝섬',
+  dataUrl: '/data/seongsu.json',
+  defaultTheme: 'river' as const,
 };
-type RegionId = keyof typeof regions;
 const categories: Record<string, string> = {
-  cafe: '카페',
-  restaurant: '식당',
-  park: '공원',
-  attraction: '볼거리',
+  meal: '식사',
+  shopping: '쇼핑',
+  daily: '생활용무',
+  culture: '문화·여가',
 };
 const categoryKinds: Record<string, string> = {
-  cafe: 'coffee',
-  restaurant: 'food',
-  park: 'park',
-  attraction: 'sightseeing',
+  meal: 'evening',
+  shopping: 'shopping',
+  daily: 'daily',
+  culture: 'culture',
 };
 const sceneries = {
   water: '물가',
@@ -148,7 +149,7 @@ const sceneries = {
   any: '상관없음',
 };
 const defaults: RouteInput = {
-  origin: { nodeId: '4655208788' },
+  origin: { nodeId: '4963715634' },
   destinationId: '',
   minutes: 60,
   paceMinKm: 7,
@@ -167,8 +168,6 @@ const defaults: RouteInput = {
 };
 const formatKm = (meters: number) => (meters / 1000).toFixed(2);
 export default function RunApp() {
-  const [regionId, setRegionId] = useState<RegionId>('seongsu');
-  const region = regions[regionId];
   const [graph, setGraph] = useState<LocalGraph | null>(null),
     [loadError, setLoadError] = useState('');
   const [form, setForm] = useState<RouteInput>(defaults),
@@ -201,9 +200,9 @@ export default function RunApp() {
     [actualKm, setActualKm] = useState(''),
     [actualMinutes, setActualMinutes] = useState(''),
     [finishError, setFinishError] = useState('');
-  const [sheet, setSheet] = useState<
-    'settings' | 'place' | 'about' | 'region' | null
-  >(null);
+  const [sheet, setSheet] = useState<'settings' | 'place' | 'about' | null>(
+    null,
+  );
   const [session, setSession] = useState<RunSession | null>(null),
     [now, setNow] = useState(0),
     [sessionError, setSessionError] = useState('');
@@ -297,7 +296,7 @@ export default function RunApp() {
           );
       });
     return () => abort.abort();
-  }, [region.dataUrl, region.defaultTheme]);
+  }, []);
   useEffect(() => {
     void Promise.resolve().then(() => {
       try {
@@ -320,23 +319,6 @@ export default function RunApp() {
     });
   }, []);
 
-  function selectRegion(nextRegionId: RegionId) {
-    if (nextRegionId === regionId) {
-      setSheet(null);
-      return;
-    }
-    computeId.current++;
-    setBusy(false);
-    setGraph(null);
-    setLoadError('');
-    setRegionId(nextRegionId);
-    setPlaceQuery('');
-    setOriginQuery('');
-    setPlaceSearchResults([]);
-    setOriginSearchResults([]);
-    setSheet(null);
-    setNotice(`${regions[nextRegionId].name} 지도로 바꿨어요.`);
-  }
   function update(patch: Partial<RouteInput>) {
     setDestinationRequest(null);
     setPreviewOpen(false);
@@ -468,7 +450,7 @@ export default function RunApp() {
     const n = graph?.nodes.find(
       (n) => n.id === ('nodeId' in form.origin ? form.origin.nodeId : ''),
     );
-    return n ? [n.lon, n.lat] : [128.9097283, 37.7985231];
+    return n ? [n.lon, n.lat] : [127.0447761, 37.5435865];
   }, [form.origin, graph]);
   const originPreset = graph?.origins.find(
     (p) => 'nodeId' in form.origin && p.nodeId === form.origin.nodeId,
@@ -780,9 +762,9 @@ export default function RunApp() {
             >
               RUN<span>&</span>LOCAL<span className="brand-period">.</span>
             </button>
-            <button className="city-switch" onClick={() => setSheet('region')}>
-              <span /> {region.city} <ChevronDown size={15} />
-            </button>
+            <span className="city-switch" aria-label="지원 지역: 서울 성수">
+              <span /> 서울·성수
+            </span>
           </header>
           <Tabs
             value={tab}
@@ -833,7 +815,13 @@ export default function RunApp() {
                         <MapPin size={18} />
                       </span>
                       <span>
-                        <small>오늘의 목적지</small>
+                        <small>
+                          {destination
+                            ? missionLabelForDestinationType(
+                                destination.destinationType,
+                              )
+                            : '오늘의 목적지'}
+                        </small>
                         <strong>
                           {destination?.name ?? '어디까지 달려볼까요?'}
                         </strong>
@@ -1037,12 +1025,7 @@ export default function RunApp() {
                               onClick={() => setSheet('place')}
                             >
                               <div className="destination-thumb">
-                                {shownDestination?.id === 'way/648051405' ? (
-                                  <img
-                                    src="/images/gangmun-beach.jpg"
-                                    alt="강문해변의 GANGMUN 포토존과 바다"
-                                  />
-                                ) : shownDestination?.category === 'cafe' ? (
+                                {shownDestination?.category === 'cafe' ? (
                                   <Coffee size={28} />
                                 ) : (
                                   <MapPin size={28} />
@@ -1052,9 +1035,11 @@ export default function RunApp() {
                                 <small>달리기 끝에 만나는</small>
                                 <strong>{shownDestination?.name}</strong>
                                 <em>
-                                  {shownDestination
-                                    ? categories[shownDestination.category]
-                                    : ''}{' '}
+                                  {shownDestination?.destinationType
+                                    ? DESTINATION_TYPE_LABELS[
+                                        shownDestination.destinationType
+                                      ]
+                                    : '목적지'}{' '}
                                   · {submitted.pauseMinutes}분 머무르기
                                 </em>
                               </span>
@@ -1269,15 +1254,6 @@ export default function RunApp() {
                 <span>앱 정보 · 데이터와 개인정보</span>
                 <ChevronRight size={18} />
               </button>
-              <a
-                className="settings-row"
-                href="https://run-and-local-gangneung.jason1207890.chatgpt.site/downloads/run-and-local.apk"
-                download
-              >
-                <Smartphone size={18} />
-                <span>Android 앱 설치 파일</span>
-                <Download size={18} />
-              </a>
               <p className="local-note">
                 기록과 저장한 코스는 이 기기에 보관돼요.
                 <br />
@@ -1543,9 +1519,9 @@ export default function RunApp() {
           )}
           {sheet === 'place' && (
             <>
-              <DialogTitle>달려갈 목적지</DialogTitle>
+              <DialogTitle>오늘 어차피 가야 하는 곳</DialogTitle>
               <DialogDescription>
-                도착하는 즐거움이 있는 곳을 골라보세요.
+                식사·쇼핑·문화·생활 일정을 러닝으로 바꿔보세요.
               </DialogDescription>
               <div className="category-row">
                 {[['all', '전체'], ...Object.entries(categories)].map(
@@ -1583,7 +1559,7 @@ export default function RunApp() {
                 <ComboboxInput
                   onKeyDown={handlePlaceSearchEnter}
                   aria-label="목적지 이름 검색"
-                  placeholder="카페, 식당, 공원 검색"
+                  placeholder="식당·쇼핑·문화·생활 목적지 검색"
                   showTrigger={false}
                   className="search-field place-search"
                 >
@@ -1603,8 +1579,8 @@ export default function RunApp() {
                         {p.name}
                         <small className="place-category">
                           {p.source === 'kakao'
-                            ? `카카오맵 · ${categories[p.category]}`
-                            : `저장 장소 · ${categories[p.category]}`}
+                            ? `카카오맵 · ${p.destinationType ? DESTINATION_TYPE_LABELS[p.destinationType] : '목적지'}`
+                            : `저장 장소 · ${p.destinationType ? DESTINATION_TYPE_LABELS[p.destinationType] : '목적지'}`}
                         </small>
                       </ComboboxItem>
                     )}
@@ -1616,21 +1592,20 @@ export default function RunApp() {
                   카카오맵 검색에 연결하지 못해 저장된 장소에서 찾았어요.
                 </p>
               )}
-              {destination?.id === 'way/648051405' && (
-                <figure className="place-photo">
-                  <img
-                    src="/images/gangmun-beach.jpg"
-                    alt="실제 강문해변의 바다와 포토존"
-                  />
-                  <figcaption>
-                    강문해변 · Mobius6 / Wikimedia Commons · CC BY-SA 4.0
-                  </figcaption>
-                </figure>
-              )}
               {destination && (
                 <div className="place-detail">
-                  <span>{categories[destination.category]}</span>
+                  <span>
+                    {missionLabelForDestinationType(
+                      destination.destinationType,
+                    )}
+                  </span>
                   <h2>{destination.name}</h2>
+                  {destination.destinationType && (
+                    <p>
+                      목적지 유형 ·{' '}
+                      {DESTINATION_TYPE_LABELS[destination.destinationType]}
+                    </p>
+                  )}
                   <p>
                     {destination.openingHours
                       ? `등록된 영업시간: ${destination.openingHours}`
@@ -1651,50 +1626,7 @@ export default function RunApp() {
                 <ArrowRight size={20} />
               </Button>
               <p className="field-help">
-                카페·식당·공원·볼거리 {pois.length}곳에서 선택
-              </p>
-            </>
-          )}
-          {sheet === 'region' && (
-            <>
-              <DialogTitle>달릴 지역 선택</DialogTitle>
-              <DialogDescription>
-                지역별 도로망을 필요할 때만 불러와요.
-              </DialogDescription>
-              <div className="region-options">
-                {(
-                  Object.entries(regions) as [
-                    RegionId,
-                    (typeof regions)[RegionId],
-                  ][]
-                ).map(([id, item]) => (
-                  <button
-                    key={id}
-                    className={regionId === id ? 'selected' : ''}
-                    onClick={() => selectRegion(id)}
-                    aria-pressed={regionId === id}
-                  >
-                    <span>
-                      <MapPin size={20} />
-                    </span>
-                    <span>
-                      <strong>{item.name}</strong>
-                      <small>
-                        {id === 'seongsu'
-                          ? '성수·서울숲·뚝섬 실증권역'
-                          : '기존 강릉 서비스 권역'}
-                      </small>
-                    </span>
-                    {regionId === id ? (
-                      <Check size={19} />
-                    ) : (
-                      <ChevronRight size={19} />
-                    )}
-                  </button>
-                ))}
-              </div>
-              <p className="field-help">
-                지역을 바꾸면 출발점과 목적지를 새 지도에 맞게 다시 설정해요.
+                카카오맵에서 성수·서울숲·뚝섬 권역의 목적지를 검색해요.
               </p>
             </>
           )}
@@ -1727,19 +1659,11 @@ export default function RunApp() {
               )}
               <div className="about-section">
                 <h2>{region.name} 시범지역</h2>
-                {regionId === 'seongsu' ? (
-                  <p>
-                    성수·서울숲·뚝섬과 한강 남·북단 연결 구간의 OSM 보행
-                    도로망에서 코스를 계산해요. 현재 고도·경사는 미확인이며,
-                    실제 공사·현장 통행과 상점 입구는 방문 전 확인해야 해요.
-                  </p>
-                ) : (
-                  <p>
-                    강릉 전역의 실제 지도 구간에서 코스를 계산해요. 경사는 공개
-                    지표면 고도의 추정값이에요. 실제 도로 경사·공사·현장 통행과
-                    상점 입구는 확인되지 않았어요.
-                  </p>
-                )}
+                <p>
+                  성수·서울숲·뚝섬과 한강 남·북단 연결 구간의 OSM 보행
+                  도로망에서 코스를 계산해요. 현재 고도·경사는 미확인이며, 실제
+                  공사·현장 통행과 상점 입구는 방문 전 확인해야 해요.
+                </p>
                 <h2>규칙 기반 추천</h2>
                 <p>
                   목표 거리·테마·경사·노면을 경로 탐색과 순위 계산에 반영해요.
@@ -1748,20 +1672,20 @@ export default function RunApp() {
                   기준이에요. 이용자 데이터로 학습한 모델이나 안전·성공 확률은
                   아니에요.
                 </p>
+                <h2>서울 집계 소비패턴의 역할</h2>
+                <p>
+                  2025년 서울 집계데이터에서 목적지형 이용건수는 쇼핑 55.3%,
+                  식사 39.7%로 나타났어요. 이 결과는 생활 미션 메뉴와 조건을
+                  통과한 장소의 보조 정렬에만 사용해요. USEC는 방문자 수가 아닌
+                  카드 이용건수이며, VLM/USEC는 건당 평균 결제금액입니다. 개인
+                  이동경로·선호·러너의 소비를 예측하는 데이터가 아닙니다.
+                </p>
                 <h2>고도·경사 데이터</h2>
-                {regionId === 'gangneung' ? (
-                  <p>
-                    Copernicus GLO-30 지표면 모델을 평활화하고 60m 이상 간격으로
-                    경사를 추정해요. 수목·건물이 포함되며 실제 도로의 순간 최대
-                    경사는 아니에요. 교량·터널·계단은 경사 미확인으로 남겨요.
-                  </p>
-                ) : (
-                  <p>
-                    성수 실증판은 고도 데이터를 아직 결합하지 않아 경사를
-                    ‘미확인’으로 표시해요. 경사 선호는 고도 결합 후 정밀하게
-                    반영할 예정이에요.
-                  </p>
-                )}
+                <p>
+                  성수 실증판은 고도 데이터를 아직 결합하지 않아 경사를
+                  ‘미확인’으로 표시해요. 경사 선호는 고도 결합 후 정밀하게
+                  반영할 예정이에요.
+                </p>
                 {graph?.metadata.terrain && (
                   <p className="dem-attribution">
                     <a
@@ -1795,15 +1719,6 @@ export default function RunApp() {
                 >
                   지도 출처·라이선스 ↗
                 </a>
-                {regionId === 'gangneung' && (
-                  <a
-                    href="https://commons.wikimedia.org/wiki/File:Gangmun_Beach_20220502_004.jpg"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    강문해변 사진: Mobius6 · CC BY-SA 4.0 ↗
-                  </a>
-                )}
               </div>
             </>
           )}

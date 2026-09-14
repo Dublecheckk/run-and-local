@@ -7,9 +7,8 @@ import { handlePlaceSearchEnter } from '@/lib/place-search';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowRight,
-  Camera,
   Check,
-  Coffee,
+  CalendarDays,
   LocateFixed,
   MapPin,
   Mountain,
@@ -21,6 +20,7 @@ import {
   Search,
   Timer,
   UtensilsCrossed,
+  ShoppingBag,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -51,6 +51,10 @@ import {
   type RouteInput,
 } from '@/lib/recommender';
 import { parseProfile, type RunnerProfile } from '@/lib/profile';
+import {
+  missionLabelForDestinationType,
+  type DestinationType,
+} from '@/lib/destination-context';
 import MapView from './map-view';
 import {
   RUN_KINDS,
@@ -87,21 +91,21 @@ const experiences = {
   experienced: ['러닝이 익숙해요', '거리와 페이스를 조절해요'],
 };
 const runKindPresentation = {
-  coffee: {
-    icon: Coffee,
-    prompt: '커피 한 잔을 향해',
+  daily: {
+    icon: Building2,
+    prompt: '식사·쇼핑·생활용무까지',
   },
-  food: {
+  shopping: {
+    icon: ShoppingBag,
+    prompt: '필요한 물건을 사러 가는 길',
+  },
+  evening: {
     icon: UtensilsCrossed,
-    prompt: '맛있는 도착을 향해',
+    prompt: '식사나 약속 장소까지',
   },
-  park: {
-    icon: Trees,
-    prompt: '초록 쉼표를 향해',
-  },
-  sightseeing: {
-    icon: Camera,
-    prompt: '도시의 장면을 향해',
+  culture: {
+    icon: CalendarDays,
+    prompt: '전시·공연·여가 장소까지',
   },
 } as const;
 
@@ -500,7 +504,7 @@ export default function RunSetup({
   const [step, setStep] = useState(initialStep),
     [error, setError] = useState(''),
     [mapOpen, setMapOpen] = useState(false),
-    [runKind, setRunKind] = useState<RunKind>('coffee'),
+    [runKind, setRunKind] = useState<RunKind>('daily'),
     [placeBusy, setPlaceBusy] = useState(false),
     [suggestedPlaces, setSuggestedPlaces] = useState<VerifiedPlace[]>([]),
     [placeQuery, setPlaceQuery] = useState(''),
@@ -513,8 +517,10 @@ export default function RunSetup({
     [originSearchBusy, setOriginSearchBusy] = useState(false);
   const places =
     graph?.pois
-      .filter((p) =>
-        ['cafe', 'restaurant', 'park', 'attraction'].includes(p.category),
+      .filter(
+        (p) =>
+          !('routeEligible' in p) ||
+          (p as Poi & { routeEligible?: boolean }).routeEligible !== false,
       )
       .sort((a, b) => a.name.localeCompare(b.name, 'ko')) ?? [];
   const setupRouter = useMemo(
@@ -542,7 +548,7 @@ export default function RunSetup({
   const originCoordinate: [number, number] =
     'lon' in form.origin
       ? [form.origin.lon, form.origin.lat]
-      : [originNode?.lon ?? 128.9097, originNode?.lat ?? 37.7985];
+      : [originNode?.lon ?? 127.0448, originNode?.lat ?? 37.5436];
   const originLon = originCoordinate[0];
   const originLat = originCoordinate[1];
   useEffect(() => {
@@ -657,6 +663,13 @@ export default function RunSetup({
         places: data.places,
         limit: 18,
       });
+      if (!ranked.length) {
+        setSuggestedPlaces([]);
+        setError(
+          '이 미션에 맞으면서 현재 거리 안에 있는 장소를 찾지 못했어요. 다른 미션을 고르거나 최대 거리를 늘려보세요.',
+        );
+        return;
+      }
       await new Promise<void>((resolve) =>
         requestAnimationFrame(() => resolve()),
       );
@@ -692,7 +705,12 @@ export default function RunSetup({
             actualMinutes: route.bufferedMinutes,
             routeScore: route.score,
             adjustment,
-            score: finalDestinationScore(place.score, route.score, adjustment),
+            score: finalDestinationScore(
+              place.score,
+              route.score,
+              adjustment,
+              RUN_KINDS[runKind].contextPrior,
+            ),
           });
         }
       };
@@ -704,7 +722,7 @@ export default function RunSetup({
       setSuggestedPlaces(verified.slice(0, 3));
       if (!verified.length)
         setError(
-          '실제 보행망으로 확인했지만 현재 거리·시간에서 가능한 코스가 없어요. 최대 거리를 늘려보세요.',
+          '장소 후보는 찾았지만 실제 보행망에서 현재 거리·시간 조건을 통과한 코스가 없어요. 최대 거리나 시간을 늘려보세요.',
         );
     } catch (e) {
       setError(
@@ -779,21 +797,12 @@ export default function RunSetup({
       <main className="setup-content">
         {step === 0 && (
           <>
-            {cityName === '강릉' ? (
-              <div className="welcome-photo">
-                <img src="/images/gangmun-beach.jpg" alt="강문해변의 바다" />
-                <span>
-                  <MapPin size={14} /> 강릉에서 시작해요
-                </span>
-              </div>
-            ) : (
-              <div className="welcome-region-card">
-                <span className="welcome-route-line" />
-                <MapPin size={29} />
-                <strong>성수·서울숲·뚝섬</strong>
-                <small>한강과 서울숲을 이어 달려요</small>
-              </div>
-            )}
+            <div className="welcome-region-card">
+              <span className="welcome-route-line" />
+              <MapPin size={29} />
+              <strong>성수·서울숲·뚝섬</strong>
+              <small>한강과 서울숲을 이어 달려요</small>
+            </div>
             <p className="overline">A PLACE TO GO. A REASON TO RUN.</p>
             <h1>
               가고 싶은 곳까지,
@@ -815,16 +824,6 @@ export default function RunSetup({
                 <Mountain size={18} /> 오르막 정도
               </span>
             </div>
-            {cityName === '강릉' && (
-              <a
-                className="photo-credit"
-                href="https://commons.wikimedia.org/wiki/File:Gangmun_Beach_20220502_004.jpg"
-                target="_blank"
-                rel="noreferrer"
-              >
-                강문해변 사진 · Mobius6 · CC BY-SA 4.0 ↗
-              </a>
-            )}
           </>
         )}
         {step === 1 && (
@@ -848,6 +847,45 @@ export default function RunSetup({
                 }
               />
             </div>
+            <div className="demographic-grid">
+              <div className="form-field">
+                <label htmlFor="성별">
+                  성별 <small>선택</small>
+                </label>
+                <Choice
+                  label="성별"
+                  value={profile.sex}
+                  items={{
+                    unspecified: '선택하지 않음',
+                    F: '여성',
+                    M: '남성',
+                  }}
+                  onChange={(sex) => onProfile({ ...profile, sex })}
+                />
+              </div>
+              <div className="form-field">
+                <label htmlFor="연령대">
+                  연령대 <small>선택</small>
+                </label>
+                <Choice
+                  label="연령대"
+                  value={profile.ageGroup}
+                  items={{
+                    unspecified: '선택하지 않음',
+                    '20': '20대',
+                    '30': '30대',
+                    '40': '40대',
+                    '50': '50대',
+                    '60': '60대',
+                  }}
+                  onChange={(ageGroup) => onProfile({ ...profile, ageGroup })}
+                />
+              </div>
+            </div>
+            <p className="field-help data-caution">
+              성별·연령대는 선택 항목이며 이 기기에만 저장돼요. 현재는 소비
+              군집을 개인 선호로 판단하지 않아요.
+            </p>
             <fieldset className="experience-setting">
               <legend>러닝 경험</legend>
               {Object.entries(experiences).map(([key, [label, detail]]) => (
@@ -1036,8 +1074,8 @@ export default function RunSetup({
                         'lon' in form.origin
                           ? [form.origin.lon, form.origin.lat]
                           : [
-                              originNode?.lon ?? 128.9097,
-                              originNode?.lat ?? 37.7985,
+                              originNode?.lon ?? 127.0448,
+                              originNode?.lat ?? 37.5436,
                             ]
                       }
                       destination={destination}
@@ -1054,116 +1092,8 @@ export default function RunSetup({
                   </div>
                 )}
                 <div className="form-field destination-setup">
-                  <fieldset className="run-kind-grid">
-                    <legend>오늘 어떤 런을 할까요?</legend>
-                    {Object.entries(RUN_KINDS).map(([key, item]) => {
-                      const presentation = runKindPresentation[key as RunKind];
-                      const Icon = presentation.icon;
-                      return (
-                        <Button
-                          key={key}
-                          type="button"
-                          className="run-kind-card"
-                          data-kind={key}
-                          aria-pressed={runKind === key}
-                          variant="outline"
-                          onClick={() => setRunKind(key as RunKind)}
-                        >
-                          <span className="run-kind-icon">
-                            <Icon aria-hidden size={19} />
-                          </span>
-                          <span>
-                            <strong>{item.label}</strong>
-                            <small>{presentation.prompt}</small>
-                          </span>
-                          {runKind === key && (
-                            <Check className="run-kind-check" size={15} />
-                          )}
-                        </Button>
-                      );
-                    })}
-                  </fieldset>
-                  <Button
-                    type="button"
-                    className="destination-recommend-action"
-                    disabled={placeBusy}
-                    onClick={() => void suggestDestinations()}
-                  >
-                    <Sparkles size={17} />
-                    {placeBusy
-                      ? '카카오맵에서 찾는 중…'
-                      : '내 조건에 맞는 목적지 추천'}
-                  </Button>
-                  {suggestedPlaces.length > 0 && (
-                    <section
-                      className="destination-recommendations"
-                      aria-label="추천 목적지"
-                    >
-                      <div className="recommendation-heading">
-                        <div>
-                          <span>RUN &amp; LOCAL PICKS</span>
-                          <h2>오늘의 목적지</h2>
-                        </div>
-                        <small>실제 보행 경로 확인 완료</small>
-                      </div>
-                      {suggestedPlaces.map((p, index) => (
-                        <button
-                          type="button"
-                          key={p.id}
-                          className={`destination-card${destination?.id === p.id ? ' selected' : ''}`}
-                          onClick={() =>
-                            onDestination({
-                              destinationId: p.id,
-                              ...(p.adjustment
-                                ? { theme: 'any', scenery: 'any' }
-                                : {}),
-                              ...(p.adjustment === 'out_and_back'
-                                ? { mode: 'out_and_back' }
-                                : {}),
-                            })
-                          }
-                        >
-                          <span className="destination-card-topline">
-                            <span className="rank-badge">
-                              {index + 1}순위 · {RUN_KINDS[runKind].label}
-                            </span>
-                            {p.adjustment && (
-                              <span className="adjustment-badge">
-                                {p.adjustment === 'theme'
-                                  ? '테마 유연'
-                                  : '왕복 대안'}
-                              </span>
-                            )}
-                          </span>
-                          <span className="destination-card-title">
-                            <strong>{p.name}</strong>
-                            {destination?.id === p.id && (
-                              <Check aria-label="선택됨" size={18} />
-                            )}
-                          </span>
-                          <span className="destination-card-copy">
-                            {p.address || p.reasons[2]}
-                          </span>
-                          <span className="destination-metrics">
-                            <span>
-                              <strong>{p.actualCourseKm.toFixed(1)}</strong>
-                              <small>KM</small>
-                            </span>
-                            <span>
-                              <strong>{Math.round(p.actualMinutes)}</strong>
-                              <small>MIN</small>
-                            </span>
-                            <span>
-                              <strong>{Math.round(p.score)}</strong>
-                              <small>FIT</small>
-                            </span>
-                          </span>
-                        </button>
-                      ))}
-                    </section>
-                  )}
                   <label htmlFor="setup-destination-search">
-                    또는 목적지 직접 검색
+                    오늘 어차피 가야 하는 곳
                   </label>
                   <Combobox
                     autoHighlight
@@ -1188,7 +1118,7 @@ export default function RunSetup({
                       onKeyDown={handlePlaceSearchEnter}
                       aria-label="목적지 검색"
                       id="setup-destination-search"
-                      placeholder="카페·식당·공원 이름 검색"
+                      placeholder="식당·쇼핑·문화·생활 목적지 검색"
                       showTrigger={false}
                       className="search-field"
                     >
@@ -1221,12 +1151,135 @@ export default function RunSetup({
                       카카오맵에 연결할 수 없어 저장된 장소에서 찾고 있어요.
                     </p>
                   )}
+                  {!destination && (
+                    <div className="context-recommendation">
+                      <p className="context-divider">
+                        <span>아직 목적지가 없다면</span>
+                      </p>
+                      <fieldset className="run-kind-grid">
+                        <legend>오늘의 생활 미션</legend>
+                        {Object.entries(RUN_KINDS).map(([key, item]) => {
+                          const presentation =
+                            runKindPresentation[key as RunKind];
+                          const Icon = presentation.icon;
+                          return (
+                            <Button
+                              key={key}
+                              type="button"
+                              className="run-kind-card"
+                              data-kind={key}
+                              aria-pressed={runKind === key}
+                              variant="outline"
+                              onClick={() => setRunKind(key as RunKind)}
+                            >
+                              <span className="run-kind-icon">
+                                <Icon aria-hidden size={19} />
+                              </span>
+                              <span>
+                                <strong>{item.label}</strong>
+                                <small>{presentation.prompt}</small>
+                              </span>
+                              {runKind === key && (
+                                <Check className="run-kind-check" size={15} />
+                              )}
+                            </Button>
+                          );
+                        })}
+                      </fieldset>
+                      <Button
+                        type="button"
+                        className="destination-recommend-action"
+                        disabled={placeBusy}
+                        onClick={() => void suggestDestinations()}
+                      >
+                        <Sparkles size={17} />
+                        {placeBusy
+                          ? '카카오맵에서 찾는 중…'
+                          : '미션에 맞는 목적지 추천'}
+                      </Button>
+                      <p className="field-help data-caution">
+                        서울 집계 소비패턴은 메뉴 구성과 보조 정렬에만 사용해요.
+                        개인 선호나 이동경로를 예측하지 않아요.
+                      </p>
+                    </div>
+                  )}
+                  {suggestedPlaces.length > 0 && !destination && (
+                    <section
+                      className="destination-recommendations"
+                      aria-label="추천 목적지"
+                    >
+                      <div className="recommendation-heading">
+                        <div>
+                          <span>RUN &amp; LOCAL PICKS</span>
+                          <h2>오늘의 목적지</h2>
+                        </div>
+                        <small>실제 보행 경로 확인 완료</small>
+                      </div>
+                      {suggestedPlaces.map((p, index) => (
+                        <button
+                          type="button"
+                          key={p.id}
+                          className="destination-card"
+                          onClick={() =>
+                            onDestination({
+                              destinationId: p.id,
+                              ...(p.adjustment
+                                ? { theme: 'any', scenery: 'any' }
+                                : {}),
+                              ...(p.adjustment === 'out_and_back'
+                                ? { mode: 'out_and_back' }
+                                : {}),
+                            })
+                          }
+                        >
+                          <span className="destination-card-topline">
+                            <span className="rank-badge">
+                              {index + 1}순위 · {RUN_KINDS[runKind].label}
+                            </span>
+                            {p.contextBonus > 0 && (
+                              <span className="context-badge">
+                                Context +{p.contextBonus.toFixed(1)}
+                              </span>
+                            )}
+                          </span>
+                          <span className="destination-card-title">
+                            <strong>{p.name}</strong>
+                          </span>
+                          <span className="destination-card-copy">
+                            {p.address || p.reasons[2]}
+                          </span>
+                          <span className="destination-metrics">
+                            <span>
+                              <strong>{p.actualCourseKm.toFixed(1)}</strong>
+                              <small>KM</small>
+                            </span>
+                            <span>
+                              <strong>{Math.round(p.actualMinutes)}</strong>
+                              <small>MIN</small>
+                            </span>
+                            <span>
+                              <strong>{Math.round(p.score)}</strong>
+                              <small>FIT</small>
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </section>
+                  )}
                 </div>
                 {destination && (
                   <div className="setup-destination">
                     <MapPin size={24} />
                     <span>
-                      <small>오늘 달려갈 곳</small>
+                      <small>
+                        {missionLabelForDestinationType(
+                          (
+                            destination as Poi & {
+                              destinationType?: DestinationType;
+                            }
+                          ).destinationType,
+                        )}
+                      </small>
                       <strong>{destination.name}</strong>
                     </span>
                     <Check size={19} />

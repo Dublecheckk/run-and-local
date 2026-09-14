@@ -1,9 +1,33 @@
 import { RUN_KINDS, type RunKind } from '@/lib/destination-recommender';
+import {
+  MISSION_CONTEXTS,
+  classifyKakaoDestination,
+  isRouteEligible,
+  missionForDestinationType,
+  missionLabelForDestinationType,
+} from '@/lib/destination-context';
 
-const KAKAO_CATEGORY: Partial<Record<RunKind, string>> = {
-  coffee: 'CE7',
-  food: 'FD6',
-  sightseeing: 'AT4',
+type KakaoSearchPlan =
+  | { endpoint: 'category'; category: string }
+  | { endpoint: 'keyword'; query: string };
+
+const KAKAO_SEARCH: Record<RunKind, KakaoSearchPlan[]> = {
+  daily: [
+    { endpoint: 'category', category: 'FD6' },
+    { endpoint: 'category', category: 'MT1' },
+    { endpoint: 'category', category: 'CS2' },
+    { endpoint: 'category', category: 'HP8' },
+  ],
+  shopping: [
+    { endpoint: 'category', category: 'MT1' },
+    { endpoint: 'category', category: 'CS2' },
+    { endpoint: 'keyword', query: '쇼핑' },
+  ],
+  evening: [{ endpoint: 'category', category: 'FD6' }],
+  culture: [
+    { endpoint: 'category', category: 'CT1' },
+    { endpoint: 'category', category: 'AT4' },
+  ],
 };
 
 export async function GET(request: Request) {
@@ -34,27 +58,30 @@ export async function GET(request: Request) {
       { status: 400 },
     );
 
-  const endpoint = searchText
-    ? 'keyword'
-    : KAKAO_CATEGORY[kind]
-      ? 'category'
-      : 'keyword';
-  const query = new URLSearchParams({
-    x: String(x),
-    y: String(y),
-    radius: String(radius),
-    sort: 'distance',
-    size: '15',
-  });
-  if (endpoint === 'category')
-    query.set('category_group_code', KAKAO_CATEGORY[kind]!);
-  else query.set('query', searchText || '공원');
+  const plans: KakaoSearchPlan[] = searchText
+    ? [{ endpoint: 'keyword', query: searchText }]
+    : KAKAO_SEARCH[kind];
+  const requests = plans.flatMap((plan) =>
+    (searchText || plans.length === 1 ? [1, 2, 3] : [1]).map((page) => ({
+      plan,
+      page,
+    })),
+  );
   const pages = await Promise.all(
-    [1, 2, 3].map(async (page) => {
-      const pageQuery = new URLSearchParams(query);
-      pageQuery.set('page', String(page));
+    requests.map(async ({ plan, page }) => {
+      const pageQuery = new URLSearchParams({
+        x: String(x),
+        y: String(y),
+        radius: String(radius),
+        sort: 'distance',
+        size: '15',
+        page: String(page),
+      });
+      if (plan.endpoint === 'category')
+        pageQuery.set('category_group_code', plan.category);
+      else pageQuery.set('query', plan.query);
       const response = await fetch(
-        `https://dapi.kakao.com/v2/local/search/${endpoint}.json?${pageQuery}`,
+        `https://dapi.kakao.com/v2/local/search/${plan.endpoint}.json?${pageQuery}`,
         { headers: { Authorization: `KakaoAK ${key}` } },
       );
       if (!response.ok) throw new Error(`Kakao Local ${response.status}`);
@@ -73,7 +100,7 @@ export async function GET(request: Request) {
     .filter(
       (place, index, all) => all.findIndex((p) => p.id === place.id) === index,
     );
-  const requestedCategory = validKind ? RUN_KINDS[kind].category : null;
+  const requestedTypes = validKind ? RUN_KINDS[kind].destinationTypes : null;
   const categoryOf = (place: Record<string, string>) =>
     place.category_group_code === 'CE7'
       ? 'cafe'
@@ -86,23 +113,52 @@ export async function GET(request: Request) {
             : null;
   return Response.json({
     places: documents
-      .map((p) => ({ p, category: categoryOf(p) }))
+      .map((p) => {
+        const destinationType = classifyKakaoDestination({
+          categoryGroupCode: p.category_group_code,
+          categoryName: p.category_name,
+        });
+        const missionContextId = missionForDestinationType(destinationType);
+        return {
+          p,
+          category: categoryOf(p) || 'place',
+          destinationType,
+          missionContextId,
+          routeEligible: isRouteEligible(destinationType),
+        };
+      })
       .filter(
-        (item): item is { p: Record<string, string>; category: string } =>
-          (originSearch || !!item.category) &&
-          (!requestedCategory || item.category === requestedCategory),
+        (item) =>
+          originSearch ||
+          (item.routeEligible &&
+            (!requestedTypes || requestedTypes.includes(item.destinationType))),
       )
-      .map(({ p, category }) => ({
-        id: `kakao:${p.id}`,
-        name: p.place_name,
-        lon: Number(p.x),
-        lat: Number(p.y),
-        category: category || 'place',
-        categoryDetail: p.category_name,
-        address: p.road_address_name || p.address_name,
-        phone: p.phone,
-        placeUrl: p.place_url,
-        source: 'kakao',
-      })),
+      .map(
+        ({
+          p,
+          category,
+          destinationType,
+          missionContextId,
+          routeEligible,
+        }) => ({
+          id: `kakao:${p.id}`,
+          name: p.place_name,
+          lon: Number(p.x),
+          lat: Number(p.y),
+          category: category || 'place',
+          categoryDetail: p.category_name,
+          address: p.road_address_name || p.address_name,
+          phone: p.phone,
+          placeUrl: p.place_url,
+          source: 'kakao',
+          destinationType,
+          missionContextId,
+          missionLabel: missionLabelForDestinationType(destinationType),
+          contextPrior: missionContextId
+            ? MISSION_CONTEXTS[missionContextId].contextPrior
+            : 0,
+          routeEligible,
+        }),
+      ),
   });
 }

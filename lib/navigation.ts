@@ -31,7 +31,7 @@ export function readMapPosition(
     timestamp: position.timestamp,
   };
 }
-// Local projection within the Gangneung pilot; proximity is not travelled distance or arrival detection.
+// Local projection within the Seongsu pilot; proximity is not travelled distance or arrival detection.
 export function distanceToCourse(
   point: Coordinate,
   geometry: Coordinate[],

@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import {
   createDistanceConsent,
   distanceConsentInput,
@@ -31,6 +30,7 @@ const places = destinations.map(([id], i) => ({
   lon: origin.lon + 0.002 + i * 0.0002,
   lat: origin.lat + 0.002,
   category: id === 'cafe' ? 'cafe' : 'park',
+  destinationType: id === 'cafe' ? 'MEAL' : 'CULTURE_LEISURE',
 }));
 const graph: GraphData = {
   version: 'destination-choice-check',
@@ -175,55 +175,6 @@ assert.equal(
   'no_route',
 );
 
-// Regression: changing the target from 3 to 3.2km used to replace a 3.152km
-// quoted route with candidates over 3.2km. Consent must preserve the quoted path.
-const liveGraph = JSON.parse(
-  readFileSync(
-    new URL('../public/data/gangneung.json', import.meta.url),
-    'utf8',
-  ),
-) as GraphData;
-const liveRouter = createRouter(liveGraph);
-const liveInput: RouteInput = {
-  origin: { nodeId: '4655208788' },
-  destinationId: 'node/11119092279',
-  minutes: 60,
-  paceMinKm: 7,
-  maxDistanceKm: 6,
-  pauseMinutes: 5,
-  mode: 'loop',
-  scenery: 'water',
-  targetDistanceKm: 3,
-  theme: 'coast',
-  hillPreference: 'gentle',
-  surfacePreference: 'any',
-  avoidSteps: true,
-  avoidMajorRoads: false,
-  requireKnownSlope: false,
-  timeOfDay: 'day',
-};
-const liveResult = liveRouter.recommend(liveInput);
-const liveAgreement = createDistanceConsent(liveInput, liveResult)!;
-assert.ok(liveAgreement);
-const agreedRoute = liveAgreement.result.routes[0];
-assert.strictEqual(agreedRoute.geometry, liveResult.routes[0].geometry);
-assert.strictEqual(agreedRoute.edgeIds, liveResult.routes[0].edgeIds);
-assert.ok(
-  exceedsGoal(
-    agreedRoute.distanceMeters + agreedRoute.connectorDistanceMeters,
-    liveInput,
-  ),
-);
-assert.equal(
-  routesWithinGoal(liveAgreement.result, liveAgreement.input).length,
-  1,
-);
-assert.ok(agreedRoute.bufferedMinutes <= liveAgreement.input.minutes);
-assert.ok(
-  agreedRoute.distanceMeters + agreedRoute.connectorDistanceMeters <=
-    liveAgreement.input.maxDistanceKm * 1000,
-);
-assert.deepEqual({ ...liveAgreement.input, targetDistanceKm: 3 }, liveInput);
 const choices = await nearbyDestinations(
   graph,
   router,

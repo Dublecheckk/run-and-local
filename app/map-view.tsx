@@ -239,7 +239,7 @@ export default function MapView(props: Props) {
       <div
         className="map-canvas"
         ref={element}
-        aria-label="강릉 실제 지도와 추천 경로"
+        aria-label="성수·서울숲·뚝섬 실제 지도와 추천 경로"
       />
       {props.picking && (
         <div className="map-notice">지도를 눌러 출발점을 선택하세요</div>

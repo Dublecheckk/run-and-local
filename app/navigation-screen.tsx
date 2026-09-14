@@ -118,7 +118,7 @@ export default function NavigationScreen(props: Props) {
         ) {
           setFix(null);
           setLocationMessage(
-            '현재 위치가 강릉 시범지역 밖이에요. 전체 코스를 확인해 주세요.',
+            '현재 위치가 성수·서울숲·뚝섬 실증권역 밖이에요. 전체 코스를 확인해 주세요.',
           );
           return;
         }

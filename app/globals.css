@@ -1933,19 +1933,19 @@ body:has(.embedded-app) {
   background: #f1f4ed;
   color: #536850;
 }
-.run-kind-card[data-kind='coffee'] .run-kind-icon {
+.run-kind-card[data-kind='daily'] .run-kind-icon {
   background: #f3e8df;
   color: #8a5b3d;
 }
-.run-kind-card[data-kind='food'] .run-kind-icon {
+.run-kind-card[data-kind='shopping'] .run-kind-icon {
   background: #f6e6dc;
   color: #a35e39;
 }
-.run-kind-card[data-kind='park'] .run-kind-icon {
+.run-kind-card[data-kind='evening'] .run-kind-icon {
   background: #e6f0df;
   color: #4f783d;
 }
-.run-kind-card[data-kind='sightseeing'] .run-kind-icon {
+.run-kind-card[data-kind='culture'] .run-kind-icon {
   background: #e2eff3;
   color: #3a7892;
 }
@@ -1959,6 +1959,43 @@ body:has(.embedded-app) {
   top: 8px;
   right: 8px;
   color: #315842;
+}
+.demographic-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.data-caution {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #f4f6f1;
+  color: #667064;
+}
+.context-recommendation {
+  margin-top: 24px;
+}
+.context-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 6px 0 18px;
+  color: #758070;
+  font-size: 13px;
+}
+.context-divider::before,
+.context-divider::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: #dfe5da;
+}
+.context-badge {
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #eef4e7;
+  color: #57703d;
+  font-size: 11px;
+  font-weight: 750;
 }
 .destination-recommend-action {
   width: 100%;

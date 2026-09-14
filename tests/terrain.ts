@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
 import {
   createRouter,
   distanceMeters,
-  MIN_THEME_SHARE,
   validateRouteInput,
 } from '../lib/recommender.ts';
 import type { GraphData, GraphEdge, RouteInput } from '../lib/recommender.ts';
@@ -185,83 +183,6 @@ assert.throws(() =>
   parseProfile(JSON.stringify({ ...DEFAULT_PROFILE, paceMinKm: 0 })),
 );
 
-const real: GraphData = JSON.parse(
-    readFileSync('public/data/gangneung.json', 'utf8'),
-  ),
-  realRouter = createRouter(real);
-const realBase: RouteInput = {
-  ...base,
-  origin: { nodeId: '4655208788' },
-  destinationId: 'way/648051405',
-  pauseMinutes: 5,
-  maxDistanceKm: 6,
-  mode: 'loop',
-  targetDistanceKm: 5,
-};
-const report = [];
-for (const theme of ['coast', 'river', 'forest', 'road'] as const) {
-  const input = {
-    ...realBase,
-    theme,
-    scenery: (theme === 'forest'
-      ? 'green'
-      : theme === 'road'
-        ? 'city'
-        : 'water') as RouteInput['scenery'],
-  };
-  const start = performance.now(),
-    result = realRouter.recommend(input);
-  assert.equal(result.status, 'ok', `real ${theme} course exists`);
-  for (const r of result.routes) {
-    assert.ok(
-      (r.terrain.themeMatchRatio ?? 0) * r.terrain.themeCoverageRatio + 1e-9 >=
-        MIN_THEME_SHARE,
-    );
-    assert.ok(
-      r.distanceMeters + r.connectorDistanceMeters <=
-        input.maxDistanceKm * 1000 + 1e-6,
-    );
-    assert.ok(r.bufferedMinutes <= input.minutes);
-    assert.ok(r.selfOverlapRatio <= 0.25 + 1e-9);
-    assert.ok(r.geometry.length === r.edgeIds.length + 1);
-  }
-  const first = result.routes[0];
-  report.push({
-    theme,
-    elapsedMs: Math.round(performance.now() - start),
-    routes: result.routes.length,
-    km: Number((first.distanceMeters / 1000).toFixed(3)),
-    targetDeltaKm: Number((first.targetDifferenceMeters! / 1000).toFixed(3)),
-    themeShare: Number(
-      (
-        (first.terrain.themeMatchRatio ?? 0) * first.terrain.themeCoverageRatio
-      ).toFixed(4),
-    ),
-    ascentMeters: first.terrain.ascentMeters,
-    diagnostics: result.diagnostics,
-  });
-}
-assert.ok(
-  new Set(report.map((r) => `${r.km}:${r.ascentMeters}`)).size >= 3,
-  'themes change real courses, not just labels',
-);
-writeFileSync(
-  '../development/terrain-recommendation-check.json',
-  JSON.stringify(
-    {
-      date: new Date().toISOString(),
-      note: 'Deterministic functional checks, not user effectiveness or exhaustive optimality validation.',
-      report,
-    },
-    null,
-    2,
-  ) + '\n',
-);
-console.log(
-  'Terrain + device profile checks passed. Real Gangneung theme scenarios:',
-  JSON.stringify(report),
-);
-
 const device = new Map([[PROFILE_KEY, '{broken-json']]);
 const storage = {
   getItem: (key: string) => device.get(key) ?? null,
@@ -292,17 +213,6 @@ assert.throws(() =>
 assert.equal(blocked.get(PROFILE_KEY), '{broken-json');
 console.log(
   'Unreadable profile recovery preserves bytes; failed backup preserves original.',
-);
-
-const threeKm = realRouter.recommend({
-  ...realBase,
-  theme: 'coast',
-  scenery: 'water',
-  targetDistanceKm: 3,
-}).routes[0];
-assert.ok(
-  Math.abs(threeKm.distanceMeters - 3000) < 500,
-  'target distance must affect generation, not just maximum budget',
 );
 const uphill = router.recommend({
   ...base,

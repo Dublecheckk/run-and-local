@@ -11,6 +11,7 @@ import {
 import {
   RUN_KINDS,
   rankDestinations,
+  type PlaceCandidate,
   type RunKind,
 } from './destination-recommender.ts';
 
@@ -117,7 +118,11 @@ export async function nearbyDestinations(
   signal.throwIfAborted();
   const selected = graph.pois.find((p) => p.id === input.destinationId);
   const kind = (Object.keys(RUN_KINDS) as RunKind[]).find(
-    (k) => RUN_KINDS[k].category === selected?.category,
+    (k) =>
+      'destinationType' in (selected ?? {}) &&
+      RUN_KINDS[k].destinationTypes.includes(
+        (selected as PlaceCandidate).destinationType!,
+      ),
   );
   const origin =
     'lon' in input.origin
