@@ -4,7 +4,7 @@ import BackButton from './back-button';
 
 import { handlePlaceSearchEnter } from '@/lib/place-search';
 /* oxlint-disable next/no-img-element -- The same local assets run inside the native app. */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
   Check,
@@ -59,6 +59,7 @@ import MapView from './map-view';
 import {
   RUN_KINDS,
   finalDestinationScore,
+  missionMenuForProfile,
   rankDestinations,
   type DestinationAdjustment,
   type PlaceCandidate,
@@ -504,9 +505,10 @@ export default function RunSetup({
   const [step, setStep] = useState(initialStep),
     [error, setError] = useState(''),
     [mapOpen, setMapOpen] = useState(false),
-    [runKind, setRunKind] = useState<RunKind>('daily'),
+    [runKind, setRunKind] = useState<RunKind | null>(null),
     [wantsRecommendation, setWantsRecommendation] = useState(false),
-    [placeBusy, setPlaceBusy] = useState(false),
+    [placeRequestBusy, setPlaceBusy] = useState(false),
+    [suggestionForm, setSuggestionForm] = useState<RouteInput | null>(null),
     [suggestedPlaces, setSuggestedPlaces] = useState<VerifiedPlace[]>([]),
     [placeQuery, setPlaceQuery] = useState(''),
     [searchPlaces, setSearchPlaces] = useState<PlaceCandidate[]>([]),
@@ -516,6 +518,22 @@ export default function RunSetup({
     [originQuery, setOriginQuery] = useState(''),
     [originResults, setOriginResults] = useState<PlaceCandidate[]>([]),
     [originSearchBusy, setOriginSearchBusy] = useState(false);
+  const missionMenu = missionMenuForProfile(profile);
+  const placeBusy = placeRequestBusy && suggestionForm === form;
+  const suggestionRequest = useRef(0);
+  function clearSuggestions() {
+    suggestionRequest.current++;
+    setSuggestedPlaces([]);
+    setPlaceBusy(false);
+    setError('');
+  }
+  useEffect(() => {
+    const invalidate = () => {
+      suggestionRequest.current++;
+    };
+    invalidate();
+    return invalidate;
+  }, [form]);
   const places =
     graph?.pois
       .filter(
@@ -541,12 +559,13 @@ export default function RunSetup({
   );
   const destination = places.find((p) => p.id === form.destinationId) ?? null;
   const chooseDestination = (patch: Partial<RouteInput>) => {
+    clearSuggestions();
     setWantsRecommendation(false);
     onDestination(patch);
   };
   const clearDestination = () => {
+    clearSuggestions();
     setPlaceQuery('');
-    setSuggestedPlaces([]);
     setSearchPlaces([]);
     setSearchState('idle');
     onDestination({ destinationId: '' });
@@ -649,6 +668,10 @@ export default function RunSetup({
     update({ origin: { lon: place.lon, lat: place.lat } });
   }
   async function suggestDestinations() {
+    if (!runKind || placeBusy) return;
+    const request = ++suggestionRequest.current;
+    setSuggestionForm(form);
+    setSuggestedPlaces([]);
     setPlaceBusy(true);
     setError('');
     try {
@@ -660,6 +683,7 @@ export default function RunSetup({
         places?: PlaceCandidate[];
         error?: string;
       };
+      if (request !== suggestionRequest.current) return;
       if (!response.ok || !data.places)
         throw new Error(data.error || '장소를 찾지 못했어요.');
       onPlaces(data.places);
@@ -685,6 +709,7 @@ export default function RunSetup({
       await new Promise<void>((resolve) =>
         requestAnimationFrame(() => resolve()),
       );
+      if (request !== suggestionRequest.current) return;
       const candidateGraph: SetupGraph = {
         ...graph!,
         pois: [
@@ -696,9 +721,16 @@ export default function RunSetup({
       };
       const router = createRouter(candidateGraph);
       const verified: VerifiedPlace[] = [];
-      const tryConditions = (adjustment?: VerifiedPlace['adjustment']) => {
+      const tryConditions = async (
+        adjustment?: VerifiedPlace['adjustment'],
+      ) => {
         for (const place of ranked) {
           if (verified.some((item) => item.id === place.id)) continue;
+          // Let menu changes/cancellation run between expensive route searches.
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve()),
+          );
+          if (request !== suggestionRequest.current) return;
           const routeInput: RouteInput = {
             ...form,
             destinationId: place.id,
@@ -721,10 +753,14 @@ export default function RunSetup({
           });
         }
       };
-      tryConditions();
-      if (verified.length < 3 && form.theme !== 'any') tryConditions('theme');
+      await tryConditions();
+      if (request !== suggestionRequest.current) return;
+      if (verified.length < 3 && form.theme !== 'any')
+        await tryConditions('theme');
+      if (request !== suggestionRequest.current) return;
       if (verified.length < 3 && form.mode === 'loop')
-        tryConditions('out_and_back');
+        await tryConditions('out_and_back');
+      if (request !== suggestionRequest.current) return;
       verified.sort((a, b) => b.score - a.score);
       setSuggestedPlaces(verified.slice(0, 3));
       if (!verified.length)
@@ -732,11 +768,12 @@ export default function RunSetup({
           '장소 후보는 찾았지만 실제 보행망에서 현재 거리·시간 조건을 통과한 코스가 없어요. 최대 거리나 시간을 늘려보세요.',
         );
     } catch (e) {
-      setError(
-        e instanceof Error ? e.message : '장소 추천을 불러오지 못했어요.',
-      );
+      if (request === suggestionRequest.current)
+        setError(
+          e instanceof Error ? e.message : '장소 추천을 불러오지 못했어요.',
+        );
     } finally {
-      setPlaceBusy(false);
+      if (request === suggestionRequest.current) setPlaceBusy(false);
     }
   }
   const go = (next: number) => {
@@ -881,8 +918,9 @@ export default function RunSetup({
               </div>
             </div>
             <p className="field-help data-caution">
-              성별·연령대는 선택 항목이며 이 기기에만 저장돼요. 현재는 소비
-              군집을 개인 선호로 판단하지 않아요.
+              성별·연령대는 선택 항목이며 이 기기에만 저장돼요. 목적지가 없을 때
+              먼저 보여드릴 생활 미션 순서에만 사용해요. 선택하지 않아도 모든
+              미션을 이용할 수 있어요.
             </p>
             <fieldset className="experience-setting">
               <legend>러닝 경험</legend>
@@ -1155,9 +1193,8 @@ export default function RunSetup({
                         type="checkbox"
                         checked={wantsRecommendation}
                         onChange={(event) => {
+                          clearSuggestions();
                           setWantsRecommendation(event.target.checked);
-                          setSuggestedPlaces([]);
-                          setError('');
                         }}
                       />
                       <span>
@@ -1172,11 +1209,24 @@ export default function RunSetup({
                   )}
                   {!destination && wantsRecommendation && (
                     <div className="context-recommendation">
+                      <p className="field-help">
+                        {missionMenu.clusterId === null
+                          ? '오늘 할 일에 맞는 미션을 하나 골라주세요.'
+                          : '입력한 성별·연령대의 집계 소비패턴을 참고해 메뉴를 정렬했어요. 오늘 할 일은 직접 골라주세요.'}
+                      </p>
                       <fieldset className="run-kind-grid">
                         <legend>오늘의 생활 미션</legend>
-                        {Object.entries(RUN_KINDS).map(([key, item]) => {
-                          const presentation =
-                            runKindPresentation[key as RunKind];
+                        {missionMenu.cluster && (
+                          <p className="cluster-insight">
+                            <strong>회원님이 속한 그룹</strong>은{' '}
+                            <strong>{missionMenu.cluster.activity}</strong> 중심의
+                            카드 이용 유형이 인기있어요!
+                            <small>서울 집계 카드 이용건수 기준</small>
+                          </p>
+                        )}
+                        {missionMenu.kinds.map((key) => {
+                          const item = RUN_KINDS[key];
+                          const presentation = runKindPresentation[key];
                           const Icon = presentation.icon;
                           return (
                             <Button
@@ -1186,12 +1236,20 @@ export default function RunSetup({
                               data-kind={key}
                               aria-pressed={runKind === key}
                               variant="outline"
-                              onClick={() => setRunKind(key as RunKind)}
+                              onClick={() => {
+                                clearSuggestions();
+                                setRunKind(key);
+                              }}
                             >
                               <span className="run-kind-icon">
                                 <Icon aria-hidden size={19} />
                               </span>
                               <span>
+                                {missionMenu.suggestedKinds.includes(key) && (
+                                  <span className="mission-suggestion">
+                                    먼저 둘러보기
+                                  </span>
+                                )}
                                 <strong>{item.label}</strong>
                                 <small>{presentation.prompt}</small>
                               </span>
@@ -1205,92 +1263,99 @@ export default function RunSetup({
                       <Button
                         type="button"
                         className="destination-recommend-action"
-                        disabled={placeBusy}
+                        disabled={placeBusy || !runKind}
                         onClick={() => void suggestDestinations()}
                       >
                         <Sparkles size={17} />
                         {placeBusy
-                          ? '카카오맵에서 찾는 중…'
-                          : '미션에 맞는 목적지 추천'}
+                          ? '목적지와 코스 확인 중…'
+                          : !runKind
+                            ? '생활 미션을 먼저 골라주세요'
+                            : '미션에 맞는 목적지 추천'}
                       </Button>
                       <p className="field-help data-caution">
-                        서울 집계 소비패턴은 생활 미션 메뉴 구성에 사용해요.
-                        개인 선호나 이동경로를 예측하지 않아요.
+                        메뉴 순서는 개인 취향을 예측한 결과가 아니에요. 목적지와
+                        코스는 선택한 미션과 실제 거리·시간·보행 조건으로
+                        추천해요.
                       </p>
                     </div>
                   )}
-                  {suggestedPlaces.length > 0 && !destination && (
-                    <section
-                      className="destination-recommendations"
-                      aria-label="추천 목적지"
-                    >
-                      <div className="recommendation-heading">
-                        <div>
-                          <span>RUN &amp; LOCAL PICKS</span>
-                          <h2>오늘의 목적지</h2>
+                  {suggestedPlaces.length > 0 &&
+                    suggestionForm === form &&
+                    !destination &&
+                    wantsRecommendation &&
+                    runKind && (
+                      <section
+                        className="destination-recommendations"
+                        aria-label="추천 목적지"
+                      >
+                        <div className="recommendation-heading">
+                          <div>
+                            <span>RUN &amp; LOCAL PICKS</span>
+                            <h2>오늘의 목적지</h2>
+                          </div>
+                          <small>실제 보행 경로 확인 완료</small>
                         </div>
-                        <small>실제 보행 경로 확인 완료</small>
-                      </div>
-                      {suggestedPlaces.map((p, index) => (
-                        <button
-                          type="button"
-                          key={p.id}
-                          className="destination-card"
-                          onClick={() =>
-                            chooseDestination({
-                              destinationId: p.id,
-                              ...(p.adjustment
-                                ? { theme: 'any', scenery: 'any' }
-                                : {}),
-                              ...(p.adjustment === 'out_and_back'
-                                ? { mode: 'out_and_back' }
-                                : {}),
-                            })
-                          }
-                        >
-                          <span className="destination-card-topline">
-                            <span className="rank-badge">
-                              {index + 1}순위 · {RUN_KINDS[runKind].label}
+                        {suggestedPlaces.map((p, index) => (
+                          <button
+                            type="button"
+                            key={p.id}
+                            className="destination-card"
+                            onClick={() =>
+                              chooseDestination({
+                                destinationId: p.id,
+                                ...(p.adjustment
+                                  ? { theme: 'any', scenery: 'any' }
+                                  : {}),
+                                ...(p.adjustment === 'out_and_back'
+                                  ? { mode: 'out_and_back' }
+                                  : {}),
+                              })
+                            }
+                          >
+                            <span className="destination-card-topline">
+                              <span className="rank-badge">
+                                {index + 1}순위 · {RUN_KINDS[runKind].label}
+                              </span>
+                              {p.adjustment && (
+                                <span className="adjustment-badge">
+                                  {p.adjustment === 'theme'
+                                    ? '테마 유연'
+                                    : '왕복 대안 · 테마 유연'}
+                                </span>
+                              )}
                             </span>
                             {p.adjustment && (
-                              <span className="adjustment-badge">
+                              <span className="destination-card-copy">
                                 {p.adjustment === 'theme'
-                                  ? '테마 유연'
-                                  : '왕복 대안 · 테마 유연'}
+                                  ? '선택하면 테마·풍경 조건을 상관없음으로 바꿔요.'
+                                  : '선택하면 순환을 왕복으로, 테마·풍경을 상관없음으로 바꿔요.'}
                               </span>
                             )}
-                          </span>
-                          {p.adjustment && (
+                            <span className="destination-card-title">
+                              <strong>{p.name}</strong>
+                            </span>
                             <span className="destination-card-copy">
-                              {p.adjustment === 'theme'
-                                ? '선택하면 테마·풍경 조건을 상관없음으로 바꿔요.'
-                                : '선택하면 순환을 왕복으로, 테마·풍경을 상관없음으로 바꿔요.'}
+                              {p.address || p.reasons[2]}
                             </span>
-                          )}
-                          <span className="destination-card-title">
-                            <strong>{p.name}</strong>
-                          </span>
-                          <span className="destination-card-copy">
-                            {p.address || p.reasons[2]}
-                          </span>
-                          <span className="destination-metrics">
-                            <span>
-                              <strong>{p.actualCourseKm.toFixed(1)}</strong>
-                              <small>KM</small>
+                            <span className="destination-metrics">
+                              <span>
+                                <strong>{p.actualCourseKm.toFixed(1)}</strong>
+                                <small>KM</small>
+                              </span>
+                              <span>
+                                <strong>{Math.round(p.actualMinutes)}</strong>
+                                <small>MIN</small>
+                              </span>
+                              <span>
+                                <strong>{Math.round(p.score)}</strong>
+                                <small>FIT</small>
+                              </span>
                             </span>
-                            <span>
-                              <strong>{Math.round(p.actualMinutes)}</strong>
-                              <small>MIN</small>
-                            </span>
-                            <span>
-                              <strong>{Math.round(p.score)}</strong>
-                              <small>FIT</small>
-                            </span>
-                          </span>
-                        </button>
-                      ))}
-                    </section>
-                  )}
+                          </button>
+                        ))}
+                      </section>
+                    )}
                 </div>
                 {destination && (
                   <div className="setup-destination">

@@ -1944,11 +1944,29 @@ body:has(.embedded-app) {
   font-size: 14px;
   font-weight: 650;
 }
+.cluster-insight {
+  grid-column: 1 / -1;
+  margin: 0 0 3px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #edf4e8;
+  color: #3c5344;
+  font-size: 13px;
+  line-height: 1.65;
+  word-break: keep-all;
+}
+.cluster-insight small {
+  display: block;
+  margin-top: 5px;
+  color: #667064;
+  font-size: 11px;
+}
 .run-kind-card {
   position: relative;
   justify-content: flex-start !important;
   width: 100%;
-  height: 67px !important;
+  height: auto !important;
+  min-height: 96px;
   gap: 9px;
   padding: 10px !important;
   border-color: #e0e7da !important;
@@ -1967,7 +1985,20 @@ body:has(.embedded-app) {
 }
 .run-kind-card strong {
   font-size: 14px;
-  line-height: 1.2;
+  line-height: 1.35;
+  white-space: normal;
+  word-break: keep-all;
+  padding-right: 10px;
+}
+.mission-suggestion {
+  display: inline-block;
+  margin-bottom: 6px;
+  padding: 3px 5px;
+  border-radius: 5px;
+  background: #e8f2db;
+  color: #3c602b;
+  font-size: 10px;
+  font-weight: 650;
 }
 .run-kind-card small {
   overflow: hidden;

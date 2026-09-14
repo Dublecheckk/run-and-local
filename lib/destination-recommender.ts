@@ -1,4 +1,5 @@
 import { distanceMeters, type Coordinate, type Mode } from './recommender.ts';
+import type { RunnerProfile } from './profile.ts';
 import {
   MISSION_CONTEXTS,
   type DestinationType,
@@ -25,6 +26,49 @@ export const RUN_KINDS = {
   },
 } as const;
 export type RunKind = keyof typeof RUN_KINDS;
+
+// Analysis-team aggregate cluster mapping. Menu order only, never route scores.
+const CONSUMPTION_CLUSTERS: Record<
+  0 | 1 | 2 | 3,
+  { name: string; activity: string; kinds: RunKind[] }
+> = {
+  0: { name: '식사·쇼핑 혼합형', activity: '식사·쇼핑', kinds: ['daily'] },
+  1: { name: '쇼핑 중심형', activity: '쇼핑', kinds: ['shopping'] },
+  // MEAL evidence; no statistical preference inferred for cafes.
+  2: { name: '식사 중심형', activity: '식사', kinds: ['evening'] },
+  3: {
+    name: '쇼핑·식사 혼합형',
+    activity: '쇼핑·식사',
+    kinds: ['daily', 'shopping'],
+  },
+};
+
+export function missionMenuForProfile(
+  profile: Pick<RunnerProfile, 'sex' | 'ageGroup'>,
+) {
+  const supportedAge = ['20', '30', '40', '50', '60'].includes(
+    profile.ageGroup,
+  );
+  const clusterId =
+    !supportedAge || (profile.sex !== 'F' && profile.sex !== 'M')
+      ? null
+      : profile.sex === 'F'
+        ? profile.ageGroup === '20'
+          ? 0
+          : 1
+        : profile.ageGroup === '20'
+          ? 2
+          : 3;
+  const cluster = clusterId === null ? null : CONSUMPTION_CLUSTERS[clusterId];
+  const suggestedKinds = cluster ? [...cluster.kinds] : [];
+  const kinds = [
+    ...suggestedKinds,
+    ...(Object.keys(RUN_KINDS) as RunKind[]).filter(
+      (kind) => !suggestedKinds.includes(kind),
+    ),
+  ];
+  return { clusterId, cluster, suggestedKinds, kinds };
+}
 
 export type PlaceCandidate = {
   id: string;
