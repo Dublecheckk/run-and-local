@@ -2678,6 +2678,15 @@ body:has(.embedded-app) {
 .region-options small {
   display: block;
 }
+.search-results .supported-place .place-category {
+  color: #557b42;
+}
+.search-results .unsupported-place {
+  color: #8d968a;
+}
+.search-results .unsupported-place .place-category {
+  color: #a06c63;
+}
 .region-options strong {
   font-size: 15px;
 }

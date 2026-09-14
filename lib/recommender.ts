@@ -329,7 +329,8 @@ export function validateRouteInput(input: RouteInput): string | null {
       return '제외 조건이 올바르지 않아요.';
   return null;
 }
-const MAX_ORIGIN_GAP = 150,
+export const MAX_ORIGIN_GAP_METERS = 150;
+const MAX_ORIGIN_GAP = MAX_ORIGIN_GAP_METERS,
   MAX_DESTINATION_GAP = 100;
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
 export function distanceMeters(a: Coordinate, b: Coordinate): number {

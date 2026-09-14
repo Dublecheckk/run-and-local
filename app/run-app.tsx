@@ -59,6 +59,7 @@ import {
 } from '@/components/ui/dialog';
 import {
   createRouter,
+  MAX_ORIGIN_GAP_METERS,
   type Coordinate,
   type GraphData,
   type Poi,
@@ -240,6 +241,17 @@ export default function RunApp() {
     return () => clearTimeout(timer);
   }, [notice]);
   const router = useMemo(() => (graph ? createRouter(graph) : null), [graph]);
+  const originSupport = useMemo(
+    () =>
+      new Map(
+        originSearchResults.map((place) => [
+          place.id,
+          (router?.snap(place)?.distanceMeters ?? Infinity) <=
+            MAX_ORIGIN_GAP_METERS,
+        ]),
+      ),
+    [originSearchResults, router],
+  );
   useEffect(() => {
     const abort = new AbortController();
     fetch(region.dataUrl, { signal: abort.signal })
@@ -329,8 +341,17 @@ export default function RunApp() {
     update({ origin });
   }
   function selectOriginPlace(place: PlaceCandidate) {
+    if (!originSupport.get(place.id)) {
+      setNotice(
+        `${place.name}은(는) ${region.name} 지원 도로망 밖이에요. ‘지원 가능’ 장소를 골라주세요.`,
+      );
+      return;
+    }
     setOriginQuery(place.name);
     selectOrigin({ lon: place.lon, lat: place.lat }, place.name);
+  }
+  function isSupportedOrigin(place: PlaceCandidate) {
+    return originSupport.get(place.id) === true;
   }
   const mergePlaces = useCallback((places: PlaceCandidate[]) => {
     setGraph((current) =>
@@ -1387,9 +1408,18 @@ export default function RunApp() {
                               key={place.id}
                               value={place}
                               onClick={() => selectOriginPlace(place)}
+                              className={
+                                isSupportedOrigin(place)
+                                  ? 'supported-place'
+                                  : 'unsupported-place'
+                              }
                             >
                               {place.name}
-                              <small className="place-category">카카오맵</small>
+                              <small className="place-category">
+                                {isSupportedOrigin(place)
+                                  ? '지원 가능'
+                                  : '지원 권역 밖'}
+                              </small>
                             </ComboboxItem>
                           )}
                         </ComboboxList>

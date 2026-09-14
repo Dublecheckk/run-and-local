@@ -1,6 +1,6 @@
 'use client';
 /* oxlint-disable next/no-img-element -- The same local assets run inside the native app. */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -41,6 +41,7 @@ import {
   HILL_PREFERENCES,
   HILL_LIMITS,
   createRouter,
+  MAX_ORIGIN_GAP_METERS,
   validateRouteInput,
   type GraphData,
   type Poi,
@@ -495,6 +496,21 @@ export default function RunSetup({
         ['cafe', 'restaurant', 'park', 'attraction'].includes(p.category),
       )
       .sort((a, b) => a.name.localeCompare(b.name, 'ko')) ?? [];
+  const setupRouter = useMemo(
+    () => (graph ? createRouter(graph) : null),
+    [graph],
+  );
+  const originSupport = useMemo(
+    () =>
+      new Map(
+        originResults.map((place) => [
+          place.id,
+          (setupRouter?.snap(place)?.distanceMeters ?? Infinity) <=
+            MAX_ORIGIN_GAP_METERS,
+        ]),
+      ),
+    [originResults, setupRouter],
+  );
   const destination = places.find((p) => p.id === form.destinationId) ?? null;
   const preset = graph?.origins.find(
     (p) => 'nodeId' in form.origin && p.nodeId === form.origin.nodeId,
@@ -577,6 +593,13 @@ export default function RunSetup({
           ? fallbackPlaces
           : [];
   function chooseOrigin(place: PlaceCandidate) {
+    if (!originSupport.get(place.id)) {
+      setError(
+        `${place.name}은(는) 현재 지원 도로망 밖이에요. ‘지원 가능’ 장소를 골라주세요.`,
+      );
+      return;
+    }
+    setError('');
     onOriginLabel(place.name);
     setOriginQuery(place.name);
     update({ origin: { lon: place.lon, lat: place.lat } });
@@ -934,9 +957,18 @@ export default function RunSetup({
                             key={place.id}
                             value={place}
                             onClick={() => chooseOrigin(place)}
+                            className={
+                              originSupport.get(place.id)
+                                ? 'supported-place'
+                                : 'unsupported-place'
+                            }
                           >
                             {place.name}
-                            <small className="place-category">카카오맵</small>
+                            <small className="place-category">
+                              {originSupport.get(place.id)
+                                ? '지원 가능'
+                                : '지원 권역 밖'}
+                            </small>
                           </ComboboxItem>
                         )}
                       </ComboboxList>

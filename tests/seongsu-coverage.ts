@@ -33,6 +33,17 @@ for (const [, destinationName] of pairs) {
 }
 
 const router = createRouter(graph);
+assert.equal(
+  router.snap({ lon: 126.978, lat: 37.566 }),
+  null,
+  '권역 밖 출발지 차단',
+);
+for (const origin of graph.origins)
+  assert.equal(
+    router.snap(origin)?.distanceMeters,
+    0,
+    `${origin.name} 출발 가능`,
+  );
 for (const [startName, destinationName] of pairs) {
   const start = graph.origins.find((item) => item.name === startName);
   assert(start, `${startName} 기준점 누락`);
