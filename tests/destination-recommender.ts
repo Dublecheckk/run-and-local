@@ -69,5 +69,9 @@ assert.equal(cafe.length, 1);
 const originalScore = finalDestinationScore(80, 90);
 assert.equal(finalDestinationScore(80, 90, 'theme'), originalScore - 8);
 assert.equal(finalDestinationScore(80, 90, 'out_and_back'), originalScore - 15);
-assert.equal(finalDestinationScore(80, 90, undefined, 1), originalScore + 5);
+assert.equal(
+  originalScore,
+  86.5,
+  'only place and route fit contribute to the score',
+);
 console.log('Destination recommender checks passed.');

@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import {
   classifyKakaoDestination,
-  contextBonus,
   isRouteEligible,
   missionLabelForDestinationType,
 } from '../lib/destination-context.ts';
@@ -34,9 +33,6 @@ assert.equal(classifyKakaoDestination({}), 'REVIEW');
 assert.equal(isRouteEligible('REVIEW'), false);
 assert.equal(isRouteEligible('EXCLUDE'), false);
 assert.equal(isRouteEligible('MEAL'), true);
-assert.equal(contextBonus(0), 0);
-assert.equal(contextBonus(0.5), 2.5);
-assert.equal(contextBonus(10), 5);
 assert.equal(missionLabelForDestinationType('SHOPPING'), '쇼핑 목적지 러닝');
 assert.equal(missionLabelForDestinationType('MEAL'), '식사·카페 러닝');
 assert.equal(missionLabelForDestinationType('CAFE_DESSERT'), '식사·카페 러닝');

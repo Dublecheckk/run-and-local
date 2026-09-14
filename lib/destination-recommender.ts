@@ -1,7 +1,6 @@
 import { distanceMeters, type Coordinate, type Mode } from './recommender.ts';
 import {
   MISSION_CONTEXTS,
-  contextBonus,
   type DestinationType,
   type MissionContextId,
 } from './destination-context.ts';
@@ -10,23 +9,19 @@ export const RUN_KINDS = {
   daily: {
     label: MISSION_CONTEXTS.LIFE_DESTINATION_RUN.label,
     destinationTypes: MISSION_CONTEXTS.LIFE_DESTINATION_RUN.destinationTypes,
-    contextPrior: MISSION_CONTEXTS.LIFE_DESTINATION_RUN.contextPrior,
   },
   shopping: {
     label: MISSION_CONTEXTS.SHOPPING_DESTINATION_RUN.label,
     destinationTypes:
       MISSION_CONTEXTS.SHOPPING_DESTINATION_RUN.destinationTypes,
-    contextPrior: MISSION_CONTEXTS.SHOPPING_DESTINATION_RUN.contextPrior,
   },
   evening: {
     label: MISSION_CONTEXTS.EVENING_APPOINTMENT_RUN.label,
     destinationTypes: MISSION_CONTEXTS.EVENING_APPOINTMENT_RUN.destinationTypes,
-    contextPrior: MISSION_CONTEXTS.EVENING_APPOINTMENT_RUN.contextPrior,
   },
   culture: {
     label: MISSION_CONTEXTS.CULTURE_LEISURE_RUN.label,
     destinationTypes: MISSION_CONTEXTS.CULTURE_LEISURE_RUN.destinationTypes,
-    contextPrior: MISSION_CONTEXTS.CULTURE_LEISURE_RUN.contextPrior,
   },
 } as const;
 export type RunKind = keyof typeof RUN_KINDS;
@@ -40,7 +35,6 @@ export type PlaceCandidate = {
   destinationType?: DestinationType;
   missionContextId?: MissionContextId;
   missionLabel?: string;
-  contextPrior?: number;
   routeEligible?: boolean;
   categoryDetail?: string;
   address?: string;
@@ -53,7 +47,6 @@ export type RankedPlace = PlaceCandidate & {
   directDistanceMeters: number;
   estimatedCourseKm: number;
   score: number;
-  contextBonus: number;
   reasons: string[];
 };
 
@@ -71,13 +64,9 @@ export function finalDestinationScore(
   placeScore: number,
   routeScore: number,
   adjustment?: DestinationAdjustment,
-  prior?: number,
 ) {
   const penalty = adjustment ? DESTINATION_ADJUSTMENT_PENALTIES[adjustment] : 0;
-  return Math.max(
-    0,
-    placeScore * 0.35 + routeScore * 0.65 + contextBonus(prior) - penalty,
-  );
+  return Math.max(0, placeScore * 0.35 + routeScore * 0.65 - penalty);
 }
 
 export function rankDestinations(input: {
@@ -132,7 +121,6 @@ export function rankDestinations(input: {
         directDistanceMeters: direct,
         estimatedCourseKm: estimated / 1000,
         score,
-        contextBonus: contextBonus(RUN_KINDS[input.kind].contextPrior),
         reasons: [
           `직선 ${direct < 1000 ? `${Math.round(direct)}m` : `${(direct / 1000).toFixed(1)}km`} 거리`,
           `목표 ${input.targetDistanceKm}km와 가까운 예상 코스`,

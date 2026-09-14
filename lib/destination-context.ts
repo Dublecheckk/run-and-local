@@ -62,11 +62,6 @@ export const MISSION_CONTEXTS = {
   },
 } as const;
 
-export function contextBonus(contextPrior?: number) {
-  if (!Number.isFinite(contextPrior)) return 0;
-  return Math.min(5, Math.max(0, contextPrior! * 5));
-}
-
 export function missionForDestinationType(type?: DestinationType) {
   if (!type || type === 'REVIEW' || type === 'EXCLUDE') return null;
   if (type === 'SHOPPING') return 'SHOPPING_DESTINATION_RUN' as const;
