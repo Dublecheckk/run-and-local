@@ -88,6 +88,8 @@ assert.equal(
 );
 assert.equal(river.routes[0].terrain.pavedRatio, 1);
 assert.equal(forest.routes[0].terrain.unpavedRatio, 1);
+assert.equal(forest.routes[0].terrain.ascentMeters, 30);
+assert.equal(forest.routes[0].terrain.descentMeters, 26);
 const reverse = router.recommend({
   ...base,
   origin: { nodeId: 'd' },
@@ -229,4 +231,73 @@ const downhill = router.recommend({
 assert.ok(
   uphill.features.slope! >= downhill.features.slope!,
   'ascent challenge never rewards descent more than ascent',
+);
+
+// Short edges use a 60m grade baseline, but ascent must retain the full elevation delta.
+const shortNodes = [10, 13, 16].map((elevationMeters, i) => ({
+  id: String(i),
+  lon: i * 0.00027,
+  lat: 0,
+  elevationMeters,
+}));
+const shortGraph: GraphData = {
+  version: 'short-edge-elevation',
+  bbox: [-1, -1, 1, 1],
+  nodes: shortNodes,
+  pois: shortNodes.map((n) => ({ ...n, name: n.id, category: 'park' })),
+  edges: shortNodes.slice(1).map((n, i) => ({
+    id: String(i),
+    from: String(i),
+    to: n.id,
+    distanceMeters: distanceMeters([shortNodes[i].lon, 0], [n.lon, 0]),
+    bidirectional: true,
+    highway: 'footway',
+    gradePercent: 5,
+    gradeQuality: 'dem-estimate',
+  })),
+};
+const shortInput: RouteInput = {
+  ...base,
+  origin: { nodeId: '0' },
+  destinationId: '2',
+  targetDistanceKm: 0.2,
+};
+const shortRouter = createRouter(shortGraph);
+const forwardTerrain = shortRouter.recommend(shortInput).routes[0].terrain;
+const backwardTerrain = shortRouter.recommend({
+  ...shortInput,
+  origin: { nodeId: '2' },
+  destinationId: '0',
+}).routes[0].terrain;
+assert.equal(forwardTerrain.ascentMeters, 6);
+assert.equal(forwardTerrain.descentMeters, 0);
+assert.equal(backwardTerrain.ascentMeters, 0);
+assert.equal(backwardTerrain.descentMeters, 6);
+assert.equal(
+  forwardTerrain.maxGradePercent,
+  5,
+  'keep the disclosed grade estimate',
+);
+const partialShort = structuredClone(shortGraph);
+partialShort.edges[1].gradeQuality = 'structure-unknown';
+const partialTerrain =
+  createRouter(partialShort).recommend(shortInput).routes[0].terrain;
+assert.equal(
+  partialTerrain.ascentMeters,
+  3,
+  'unknown structures contribute no ascent',
+);
+assert.equal(partialTerrain.gradeCoverageRatio, 0.5);
+const legacyShort = structuredClone(shortGraph);
+for (const node of legacyShort.nodes) delete node.elevationMeters;
+assert.ok(
+  Math.abs(
+    createRouter(legacyShort).recommend(shortInput).routes[0].terrain
+      .ascentMeters! -
+      legacyShort.edges.reduce((sum, e) => sum + e.distanceMeters * 0.05, 0),
+  ) < 1e-7,
+  'grade-only data retains the legacy estimate',
+);
+console.log(
+  'Terrain ascent: short edges, reverse traversal, unknown structures and missing elevation checked.',
 );

@@ -2097,14 +2097,6 @@ body:has(.embedded-app) {
   flex: 1;
   background: #dfe5da;
 }
-.context-badge {
-  border-radius: 999px;
-  padding: 4px 8px;
-  background: #eef4e7;
-  color: #57703d;
-  font-size: 11px;
-  font-weight: 750;
-}
 .destination-recommend-action {
   width: 100%;
   height: 48px !important;

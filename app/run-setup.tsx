@@ -717,12 +717,7 @@ export default function RunSetup({
             actualMinutes: route.bufferedMinutes,
             routeScore: route.score,
             adjustment,
-            score: finalDestinationScore(
-              place.score,
-              route.score,
-              adjustment,
-              RUN_KINDS[runKind].contextPrior,
-            ),
+            score: finalDestinationScore(place.score, route.score, adjustment),
           });
         }
       };
@@ -1219,7 +1214,7 @@ export default function RunSetup({
                           : '미션에 맞는 목적지 추천'}
                       </Button>
                       <p className="field-help data-caution">
-                        서울 집계 소비패턴은 메뉴 구성과 보조 정렬에만 사용해요.
+                        서울 집계 소비패턴은 생활 미션 메뉴 구성에 사용해요.
                         개인 선호나 이동경로를 예측하지 않아요.
                       </p>
                     </div>
@@ -1257,12 +1252,21 @@ export default function RunSetup({
                             <span className="rank-badge">
                               {index + 1}순위 · {RUN_KINDS[runKind].label}
                             </span>
-                            {p.contextBonus > 0 && (
-                              <span className="context-badge">
-                                Context +{p.contextBonus.toFixed(1)}
+                            {p.adjustment && (
+                              <span className="adjustment-badge">
+                                {p.adjustment === 'theme'
+                                  ? '테마 유연'
+                                  : '왕복 대안 · 테마 유연'}
                               </span>
                             )}
                           </span>
+                          {p.adjustment && (
+                            <span className="destination-card-copy">
+                              {p.adjustment === 'theme'
+                                ? '선택하면 테마·풍경 조건을 상관없음으로 바꿔요.'
+                                : '선택하면 순환을 왕복으로, 테마·풍경을 상관없음으로 바꿔요.'}
+                            </span>
+                          )}
                           <span className="destination-card-title">
                             <strong>{p.name}</strong>
                           </span>

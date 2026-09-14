@@ -759,7 +759,13 @@ export function createRouter(data: GraphData) {
         knownGrade += d;
         gradeSum += Math.abs(g) * d;
         maxGrade = Math.max(maxGrade, Math.abs(g));
-        const change = (g / 100) * d * (nodes[arc.from].id === e.from ? 1 : -1);
+        const fromElevation = nodes[arc.from].elevationMeters,
+          toElevation = nodes[arc.to].elevationMeters;
+        // Grade uses a minimum baseline; do not shrink ascent on short edges.
+        const change =
+          fromElevation != null && toElevation != null
+            ? toElevation - fromElevation
+            : (g / 100) * d * (nodes[arc.from].id === e.from ? 1 : -1);
         ascent += Math.max(0, change);
         descent += Math.max(0, -change);
       }

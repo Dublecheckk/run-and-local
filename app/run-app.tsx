@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { currentPosition, exportFile } from '@/lib/device';
 import {
   elapsed,
-  parseSession,
+  restoreSession,
   SESSION_KEY,
   type RunSession,
 } from '@/lib/session';
@@ -106,7 +106,6 @@ type LocalPoi = Poi & {
   destinationType?: DestinationType;
   missionContextId?: MissionContextId;
   missionLabel?: string;
-  contextPrior?: number;
   routeEligible?: boolean;
 };
 interface LocalGraph extends GraphData {
@@ -204,6 +203,7 @@ export default function RunApp() {
     null,
   );
   const [session, setSession] = useState<RunSession | null>(null),
+    [sessionReady, setSessionReady] = useState(false),
     [now, setNow] = useState(0),
     [sessionError, setSessionError] = useState('');
   const [profile, setProfile] = useState<RunnerProfile | null>(null);
@@ -301,16 +301,6 @@ export default function RunApp() {
     void Promise.resolve().then(() => {
       try {
         setRecords(parseRecords(localStorage.getItem(RECORD_KEY)));
-        try {
-          const restored = parseSession(localStorage.getItem(SESSION_KEY));
-          setSession(restored);
-          if (restored) setSetupStep(null);
-          setNow(Date.now());
-        } catch (e) {
-          setSessionError(
-            e instanceof Error ? e.message : '진행 중 기록을 읽지 못했습니다.',
-          );
-        }
       } catch (e) {
         setStorageError(
           e instanceof Error ? e.message : '기록을 읽지 못했습니다.',
@@ -318,6 +308,31 @@ export default function RunApp() {
       }
     });
   }, []);
+
+  const sessionBounds = graph?.bbox;
+  useEffect(() => {
+    if (!sessionBounds) return;
+    void Promise.resolve().then(() => {
+      try {
+        const restored = restoreSession(localStorage, sessionBounds);
+        setSession(restored.session);
+        if (restored.session) setSetupStep(null);
+        if (restored.archived) {
+          setRecords(parseRecords(localStorage.getItem(RECORD_KEY)));
+          setNotice(
+            '이전 권역의 진행 중 기록을 백업하고 코스를 내 챌린지에 보관했어요. 성수에서 새 러닝을 시작해 주세요.',
+          );
+        }
+        setNow(Date.now());
+      } catch {
+        setSessionError(
+          '진행 중 기록을 복구·보관하지 못했어요. 원본은 유지됩니다. 기기 저장 공간을 확인한 뒤 새로고침해 주세요.',
+        );
+      } finally {
+        setSessionReady(true);
+      }
+    });
+  }, [sessionBounds]);
 
   function update(patch: Partial<RouteInput>) {
     setDestinationRequest(null);
@@ -617,7 +632,8 @@ export default function RunApp() {
   }
   function storeSession(next: RunSession | null) {
     try {
-      if (sessionError) throw new Error(sessionError);
+      if (!sessionReady || sessionError)
+        throw new Error('저장된 기록 확인이 끝나지 않았어요.');
       if (next) localStorage.setItem(SESSION_KEY, JSON.stringify(next));
       else localStorage.removeItem(SESSION_KEY);
       setSession(next);
@@ -688,7 +704,7 @@ export default function RunApp() {
   }
   const distanceDialog = (
     <DestinationChoice
-      key={destinationRequest?.id ?? 0}
+      key={`destination-${destinationRequest?.id ?? 0}`}
       request={destinationRequest}
       graph={graph}
       router={router}
@@ -707,7 +723,7 @@ export default function RunApp() {
     return (
       <>
         <RunSetup
-          key={setupStep}
+          key={`setup-${setupStep}`}
           cityName={region.city}
           initialStep={setupStep}
           graph={graph}
@@ -727,7 +743,7 @@ export default function RunApp() {
           }
           locate={() => void locate(false)}
           locationBusy={locationBusy}
-          notice={notice || profileError}
+          notice={notice || profileError || sessionError || storageError}
           loadError={loadError}
           onPlaces={mergePlaces}
           originLabel={originLabel}
@@ -1676,8 +1692,8 @@ export default function RunApp() {
                 <h2>서울 집계 소비패턴의 역할</h2>
                 <p>
                   2025년 서울 집계데이터에서 목적지형 이용건수는 쇼핑 55.3%,
-                  식사 39.7%로 나타났어요. 이 결과는 생활 미션 메뉴와 조건을
-                  통과한 장소의 보조 정렬에만 사용해요. USEC는 방문자 수가 아닌
+                  식사 39.7%로 나타났어요. 이 결과는 생활 미션 메뉴 구성에
+                  사용하며 후보 점수에는 더하지 않아요. USEC는 방문자 수가 아닌
                   카드 이용건수이며, VLM/USEC는 건당 평균 결제금액입니다. 개인
                   이동경로·선호·러너의 소비를 예측하는 데이터가 아닙니다.
                 </p>

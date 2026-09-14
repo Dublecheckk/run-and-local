@@ -6,7 +6,9 @@ export const handlePlaceSearchEnter: NonNullable<
   Combobox.Input.Props['onKeyDown']
 > = (event) => {
   if (event.key !== 'Enter') return;
-  if (event.nativeEvent.isComposing) {
+  // Safari can end composition before dispatching this Enter key.
+  // oxlint-disable-next-line typescript/no-deprecated -- 229 is the IME fallback when isComposing is already false.
+  if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
     event.preventBaseUIHandler();
     return;
   }

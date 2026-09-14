@@ -1,6 +1,5 @@
 import { RUN_KINDS, type RunKind } from '@/lib/destination-recommender';
 import {
-  MISSION_CONTEXTS,
   classifyKakaoDestination,
   isRouteEligible,
   missionForDestinationType,
@@ -157,9 +156,6 @@ export async function GET(request: Request) {
           destinationType,
           missionContextId,
           missionLabel: missionLabelForDestinationType(destinationType),
-          contextPrior: missionContextId
-            ? MISSION_CONTEXTS[missionContextId].contextPrior
-            : 0,
           routeEligible,
         }),
       ),

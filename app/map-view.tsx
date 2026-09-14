@@ -97,6 +97,11 @@ export default function MapView(props: Props) {
     return () => {
       disposed = true;
       observer?.disconnect();
+      // Remove paths before their canvas renderer so path removal cannot queue
+      // another redraw after Leaflet has destroyed the canvas context.
+      map.current?.eachLayer((item) => {
+        if (api.current && item instanceof api.current.Path) item.remove();
+      });
       map.current?.remove();
       map.current = null;
     };

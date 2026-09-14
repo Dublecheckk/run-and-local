@@ -30,7 +30,7 @@ npm run build
 
 카카오 카테고리를 `MEAL`, `SHOPPING`, `DAILY_ERRAND`, `CULTURE_LEISURE`, `SOCIAL_NIGHT`, `SPORTS_WELLNESS`, `CAFE_DESSERT`로 분류합니다. `REVIEW`와 `EXCLUDE`는 장소 추천에서 제외합니다.
 
-신한카드 Destination Type 분석은 개인 이동이나 선호를 예측하는 모델이 아닙니다. 서울 집계 소비패턴은 미션 메뉴 구성과, 필수 경로 조건을 통과한 추천 후보의 보조 정렬에만 사용합니다. Context 보너스는 최대 5점이며 사용자가 목적지를 직접 고른 경우 경로 점수에 적용하지 않습니다.
+신한카드 Destination Type 분석은 개인 이동이나 선호를 예측하는 모델이 아닙니다. 서울 집계 소비패턴은 생활 미션 메뉴 구성의 근거로 사용합니다. 같은 미션의 모든 후보에 동일하게 더해 순위에 영향을 주지 않던 Context 보너스는 제거했습니다. 목적지 추천은 장소 적합도 35% + 경로 점수 65%에서 조건 완화 감점을 적용합니다. 테마·풍경 완화 또는 순환→왕복 변경은 선택 전에 카드에 표시합니다.
 
 성별·연령대는 선택 항목으로 기기에만 저장합니다. 현재는 소비 군집을 개인 선호로 판단하지 않으며, 데이터분석팀의 4개 군집 매핑이 제공된 뒤에도 약한 보조값으로만 연결합니다.
 
@@ -40,7 +40,7 @@ npm run build
 - `lib/destination-context.ts`: Destination Type, 미션 라벨, Context prior
 - `lib/recommender.ts`: 경로 탐색·하드 제약·순위 계산
 - `tests/seongsu-coverage.ts`: 실증권역 도로망 연결성 검증
-- `tests/destination-context.ts`: 분류·미션 라벨·보조점수 상한 검증
+- `tests/destination-context.ts`: 분류·미션 라벨 검증
 - `scripts/add-terrain-elevation.py`: 공개 지표면 고도 타일 결합 및 추정 경사 생성
 
 실제 상점 입구·영업 여부·공사·야간 조명·현장 통행 가능 여부는 방문 전 확인해야 합니다. 추천 점수는 안전·성공 확률이 아닙니다.

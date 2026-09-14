@@ -1,4 +1,4 @@
-import { parseRecords, type RunRecord } from './records.ts';
+import { parseRecords, RECORD_KEY, type RunRecord } from './records.ts';
 import type { Coordinate, Mode } from './recommender.ts';
 export type NavigationPlan = {
   mode: Mode;
@@ -12,6 +12,34 @@ export type RunSession = {
   resumedAt: number | null;
 };
 export const SESSION_KEY = 'run-and-local:session:v1';
+// Never resume a saved route on another region's map. Keep both its raw state
+// and its planned course before releasing the active-session slot.
+export function restoreSession(
+  storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>,
+  [west, south, east, north]: [number, number, number, number],
+) {
+  const raw = storage.getItem(SESSION_KEY);
+  const session = parseSession(raw);
+  if (
+    !session ||
+    session.record.geometry.every(
+      ([lon, lat]) =>
+        lon >= west && lon <= east && lat >= south && lat <= north,
+    )
+  )
+    return { session, archived: false };
+
+  const records = parseRecords(storage.getItem(RECORD_KEY));
+  const next = records.some((r) => r.id === session.record.id)
+    ? records
+    : [session.record, ...records];
+  const serialized = JSON.stringify(next);
+  parseRecords(serialized);
+  storage.setItem(`${SESSION_KEY}:recovery:${session.record.id}`, raw!);
+  storage.setItem(RECORD_KEY, serialized);
+  storage.removeItem(SESSION_KEY);
+  return { session: null, archived: true };
+}
 export function elapsed(session: RunSession, now: number) {
   return (
     session.elapsedMs +
