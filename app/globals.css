@@ -1064,6 +1064,16 @@
   color: #97a489;
   text-align: center;
 }
+.selected-origin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 8px;
+  color: #425b39;
+  font-size: 13px;
+  font-weight: 650;
+}
 .sheet-action {
   margin-top: 6px;
   position: sticky;
@@ -1654,6 +1664,15 @@ body:has(.embedded-app) {
   flex-wrap: wrap;
   gap: 7px;
   margin: 14px 0;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+.quick-places legend {
+  width: 100%;
+  margin-bottom: 7px;
+  font-size: 14px;
+  font-weight: 600;
 }
 .quick-places button {
   border-radius: 24px;

@@ -1,6 +1,6 @@
 'use client';
 /* oxlint-disable next/no-img-element -- The same local assets run inside the native app. */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -36,6 +36,7 @@ import {
   COURSE_THEMES,
   HILL_PREFERENCES,
   HILL_LIMITS,
+  createRouter,
   validateRouteInput,
   type GraphData,
   type Poi,
@@ -43,6 +44,20 @@ import {
 } from '@/lib/recommender';
 import { parseProfile, type RunnerProfile } from '@/lib/profile';
 import MapView from './map-view';
+import {
+  RUN_KINDS,
+  rankDestinations,
+  type PlaceCandidate,
+  type RankedPlace,
+  type RunKind,
+} from '@/lib/destination-recommender';
+
+type VerifiedPlace = RankedPlace & {
+  actualCourseKm: number;
+  actualMinutes: number;
+  routeScore: number;
+  adjustment?: 'theme' | 'out_and_back';
+};
 
 export type SetupGraph = GraphData & {
   origins: { name: string; nodeId: string; lon: number; lat: number }[];
@@ -413,6 +428,9 @@ export default function RunSetup({
   locationBusy,
   notice,
   loadError,
+  onPlaces,
+  originLabel,
+  onOriginLabel,
   initialStep = 0,
 }: {
   graph: SetupGraph | null;
@@ -426,11 +444,25 @@ export default function RunSetup({
   locationBusy: boolean;
   notice: string;
   loadError: string;
+  onPlaces: (places: PlaceCandidate[]) => void;
+  originLabel: string;
+  onOriginLabel: (label: string) => void;
   initialStep?: number;
 }) {
   const [step, setStep] = useState(initialStep),
     [error, setError] = useState(''),
-    [mapOpen, setMapOpen] = useState(false);
+    [mapOpen, setMapOpen] = useState(false),
+    [runKind, setRunKind] = useState<RunKind>('coffee'),
+    [placeBusy, setPlaceBusy] = useState(false),
+    [suggestedPlaces, setSuggestedPlaces] = useState<VerifiedPlace[]>([]),
+    [placeQuery, setPlaceQuery] = useState(''),
+    [searchPlaces, setSearchPlaces] = useState<PlaceCandidate[]>([]),
+    [searchState, setSearchState] = useState<
+      'idle' | 'loading' | 'kakao' | 'fallback'
+    >('idle'),
+    [originQuery, setOriginQuery] = useState(''),
+    [originResults, setOriginResults] = useState<PlaceCandidate[]>([]),
+    [originSearchBusy, setOriginSearchBusy] = useState(false);
   const places =
     graph?.pois
       .filter((p) =>
@@ -444,6 +476,170 @@ export default function RunSetup({
   const originNode = graph?.nodes.find(
     (n) => 'nodeId' in form.origin && n.id === form.origin.nodeId,
   );
+  const originCoordinate: [number, number] =
+    'lon' in form.origin
+      ? [form.origin.lon, form.origin.lat]
+      : [originNode?.lon ?? 128.9097, originNode?.lat ?? 37.7985];
+  const originLon = originCoordinate[0];
+  const originLat = originCoordinate[1];
+  useEffect(() => {
+    const query = originQuery.trim();
+    if (query.length < 2) return;
+    const abort = new AbortController();
+    const timer = setTimeout(() => {
+      setOriginSearchBusy(true);
+      fetch(
+        `/api/places?query=${encodeURIComponent(query)}&purpose=origin&x=${originLon}&y=${originLat}&radius=20000`,
+        { signal: abort.signal },
+      )
+        .then((response) => {
+          if (!response.ok) throw new Error();
+          return response.json() as Promise<{ places: PlaceCandidate[] }>;
+        })
+        .then(({ places }) => setOriginResults(places))
+        .catch((reason) => {
+          if (reason?.name !== 'AbortError') setOriginResults([]);
+        })
+        .finally(() => setOriginSearchBusy(false));
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
+  }, [originQuery, originLon, originLat]);
+  useEffect(() => {
+    const query = placeQuery.trim();
+    if (query.length < 2) return;
+    const abort = new AbortController();
+    const timer = setTimeout(() => {
+      setSearchState('loading');
+      fetch(
+        `/api/places?query=${encodeURIComponent(query)}&x=${originLon}&y=${originLat}&radius=10000`,
+        { signal: abort.signal },
+      )
+        .then(async (response) => {
+          const data = (await response.json()) as {
+            places?: PlaceCandidate[];
+          };
+          if (!response.ok || !data.places?.length) throw new Error();
+          setSearchPlaces(data.places);
+          setSearchState('kakao');
+          onPlaces(data.places);
+        })
+        .catch((reason) => {
+          if (reason?.name === 'AbortError') return;
+          setSearchPlaces([]);
+          setSearchState('fallback');
+        });
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
+  }, [placeQuery, originLon, originLat, onPlaces]);
+  const fallbackPlaces = places.filter((p) =>
+    p.name
+      .toLocaleLowerCase('ko')
+      .includes(placeQuery.trim().toLocaleLowerCase('ko')),
+  );
+  const directPlaces =
+    placeQuery.trim().length < 2
+      ? []
+      : searchState === 'kakao'
+        ? searchPlaces
+        : searchState === 'fallback'
+          ? fallbackPlaces
+          : [];
+  function chooseOrigin(place: PlaceCandidate) {
+    onOriginLabel(place.name);
+    setOriginQuery(place.name);
+    update({ origin: { lon: place.lon, lat: place.lat } });
+  }
+  async function suggestDestinations() {
+    setPlaceBusy(true);
+    setError('');
+    try {
+      const radius = Math.min(20000, Math.max(1500, form.maxDistanceKm * 600));
+      const response = await fetch(
+        `/api/places?kind=${runKind}&x=${originCoordinate[0]}&y=${originCoordinate[1]}&radius=${radius}`,
+      );
+      const data = (await response.json()) as {
+        places?: PlaceCandidate[];
+        error?: string;
+      };
+      if (!response.ok || !data.places)
+        throw new Error(data.error || '장소를 찾지 못했어요.');
+      onPlaces(data.places);
+      const ranked = rankDestinations({
+        origin: originCoordinate,
+        kind: runKind,
+        targetDistanceKm: form.targetDistanceKm ?? 5,
+        maxDistanceKm: form.maxDistanceKm,
+        minutes: form.minutes,
+        paceMinKm: form.paceMinKm,
+        pauseMinutes: form.pauseMinutes,
+        mode: form.mode,
+        places: data.places,
+        limit: 18,
+      });
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      const candidateGraph: SetupGraph = {
+        ...graph!,
+        pois: [
+          ...graph!.pois.filter(
+            (p) => !data.places!.some((candidate) => candidate.id === p.id),
+          ),
+          ...data.places,
+        ],
+      };
+      const router = createRouter(candidateGraph);
+      const verified: VerifiedPlace[] = [];
+      const tryConditions = (adjustment?: VerifiedPlace['adjustment']) => {
+        for (const place of ranked) {
+          if (verified.some((item) => item.id === place.id)) continue;
+          const routeInput: RouteInput = {
+            ...form,
+            destinationId: place.id,
+            ...(adjustment === 'theme'
+              ? { theme: 'any', scenery: 'any' }
+              : adjustment === 'out_and_back'
+                ? { mode: 'out_and_back', theme: 'any', scenery: 'any' }
+                : {}),
+          };
+          const result = router.recommend(routeInput);
+          const route = result.routes[0];
+          if (!route) continue;
+          verified.push({
+            ...place,
+            actualCourseKm: route.distanceMeters / 1000,
+            actualMinutes: route.bufferedMinutes,
+            routeScore: route.score,
+            adjustment,
+            score: place.score * 0.35 + route.score * 0.65,
+          });
+          if (verified.length >= 3) break;
+        }
+      };
+      tryConditions();
+      if (verified.length < 3 && form.theme !== 'any') tryConditions('theme');
+      if (verified.length < 3 && form.mode === 'loop')
+        tryConditions('out_and_back');
+      verified.sort((a, b) => b.score - a.score);
+      setSuggestedPlaces(verified.slice(0, 3));
+      if (!verified.length)
+        setError(
+          '실제 보행망으로 확인했지만 현재 거리·시간에서 가능한 코스가 없어요. 최대 거리를 늘려보세요.',
+        );
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : '장소 추천을 불러오지 못했어요.',
+      );
+    } finally {
+      setPlaceBusy(false);
+    }
+  }
   const go = (next: number) => {
     setError('');
     setStep(next);
@@ -643,12 +839,17 @@ export default function RunSetup({
                   <Select
                     value={preset?.nodeId ?? 'custom'}
                     onValueChange={(nodeId) => {
-                      if (nodeId && nodeId !== 'custom')
+                      if (nodeId && nodeId !== 'custom') {
+                        onOriginLabel(
+                          graph.origins.find((p) => p.nodeId === nodeId)
+                            ?.name ?? '',
+                        );
                         update({ origin: { nodeId } });
+                      }
                     }}
                   >
                     <SelectTrigger id="setup-origin" className="field-control">
-                      {preset?.name ?? '지도에서 선택한 위치'}
+                      {preset?.name || originLabel || '지도에서 선택한 위치'}
                     </SelectTrigger>
                     <SelectContent>
                       {!preset && (
@@ -663,6 +864,49 @@ export default function RunSetup({
                       ))}
                     </SelectContent>
                   </Select>
+                  <Combobox
+                    items={originQuery.trim().length < 2 ? [] : originResults}
+                    itemToStringLabel={(place: PlaceCandidate) => place.name}
+                    isItemEqualToValue={(
+                      a: PlaceCandidate,
+                      b: PlaceCandidate,
+                    ) => a.id === b.id}
+                    onInputValueChange={setOriginQuery}
+                    onValueChange={(place: PlaceCandidate | null) => {
+                      if (place) chooseOrigin(place);
+                    }}
+                  >
+                    <ComboboxInput
+                      aria-label="출발 장소 검색"
+                      placeholder="카카오맵에서 출발 장소 검색"
+                    />
+                    <ComboboxContent>
+                      <ComboboxEmpty>
+                        {originSearchBusy
+                          ? '카카오맵에서 찾는 중…'
+                          : originQuery.trim().length < 2
+                            ? '장소명을 2글자 이상 입력해 주세요.'
+                            : '검색된 출발 장소가 없어요.'}
+                      </ComboboxEmpty>
+                      <ComboboxList>
+                        {(place: PlaceCandidate) => (
+                          <ComboboxItem
+                            key={place.id}
+                            value={place}
+                            onClick={() => chooseOrigin(place)}
+                          >
+                            {place.name}
+                            <small className="place-category">카카오맵</small>
+                          </ComboboxItem>
+                        )}
+                      </ComboboxList>
+                    </ComboboxContent>
+                  </Combobox>
+                  {!preset && originLabel && (
+                    <p className="field-help selected-origin">
+                      <MapPin size={14} /> 출발점으로 설정됨 · {originLabel}
+                    </p>
+                  )}
                   <div className="form-actions">
                     <Button
                       variant="outline"
@@ -697,26 +941,83 @@ export default function RunSetup({
                       routes={[]}
                       selected={0}
                       picking={true}
-                      onOrigin={(point) =>
-                        update({ origin: { lon: point[0], lat: point[1] } })
-                      }
+                      onOrigin={(point) => {
+                        onOriginLabel('지도에서 선택한 위치');
+                        update({ origin: { lon: point[0], lat: point[1] } });
+                      }}
                       onSelect={() => {}}
                     />
                     <p>지도를 눌러 출발점을 바꿀 수 있어요.</p>
                   </div>
                 )}
                 <div className="form-field destination-setup">
+                  <fieldset className="quick-places">
+                    <legend>오늘 어떤 런을 할까요?</legend>
+                    {Object.entries(RUN_KINDS).map(([key, item]) => (
+                      <Button
+                        key={key}
+                        variant={runKind === key ? 'secondary' : 'outline'}
+                        onClick={() => setRunKind(key as RunKind)}
+                      >
+                        {item.label}
+                      </Button>
+                    ))}
+                  </fieldset>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={placeBusy}
+                    onClick={() => void suggestDestinations()}
+                  >
+                    <Sparkles size={17} />
+                    {placeBusy
+                      ? '카카오맵에서 찾는 중…'
+                      : '내 조건에 맞는 목적지 추천'}
+                  </Button>
+                  {suggestedPlaces.length > 0 && (
+                    <div className="quick-places">
+                      {suggestedPlaces.map((p, index) => (
+                        <Button
+                          key={p.id}
+                          variant={
+                            destination?.id === p.id ? 'secondary' : 'outline'
+                          }
+                          onClick={() =>
+                            update({
+                              destinationId: p.id,
+                              ...(p.adjustment
+                                ? { theme: 'any', scenery: 'any' }
+                                : {}),
+                              ...(p.adjustment === 'out_and_back'
+                                ? { mode: 'out_and_back' }
+                                : {}),
+                            })
+                          }
+                        >
+                          {index + 1}순위 · {p.name} ·{' '}
+                          {p.actualCourseKm.toFixed(1)}km ·{' '}
+                          {Math.round(p.actualMinutes)}분
+                          {p.adjustment === 'theme'
+                            ? ' · 테마 유연'
+                            : p.adjustment === 'out_and_back'
+                              ? ' · 왕복 대안'
+                              : ''}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
                   <label htmlFor="setup-destination-search">
-                    달려갈 목적지
+                    또는 목적지 직접 검색
                   </label>
                   <Combobox
-                    items={places}
+                    items={directPlaces}
                     value={destination}
                     itemToStringLabel={(p: Poi) => p.name}
                     isItemEqualToValue={(a, b) => a.id === b.id}
                     onValueChange={(p) => {
                       if (p) update({ destinationId: p.id });
                     }}
+                    onInputValueChange={setPlaceQuery}
                   >
                     <ComboboxInput
                       aria-label="목적지 검색"
@@ -725,34 +1026,31 @@ export default function RunSetup({
                     />
                     <ComboboxContent>
                       <ComboboxEmpty>
-                        현재 지도에서 찾지 못했어요.
+                        {searchState === 'loading'
+                          ? '카카오맵에서 찾는 중…'
+                          : placeQuery.trim().length < 2
+                            ? '장소명을 2글자 이상 입력해 주세요.'
+                            : '검색된 장소가 없어요.'}
                       </ComboboxEmpty>
                       <ComboboxList>
                         {(p: Poi) => (
                           <ComboboxItem key={p.id} value={p}>
                             {p.name}
+                            <small className="place-category">
+                              {'source' in p && p.source === 'kakao'
+                                ? '카카오맵'
+                                : '저장 장소'}
+                            </small>
                           </ComboboxItem>
                         )}
                       </ComboboxList>
                     </ComboboxContent>
                   </Combobox>
-                </div>
-                <div className="quick-places">
-                  {['강문해변', '경포대', '안목해수욕장', '강릉커피거리']
-                    .map((name) => places.find((p) => p.name === name))
-                    .filter((p): p is Poi => !!p)
-                    .map((p) => (
-                      <Button
-                        key={p.id}
-                        variant={
-                          destination?.id === p.id ? 'secondary' : 'outline'
-                        }
-                        onClick={() => update({ destinationId: p.id })}
-                      >
-                        <MapPin size={13} />
-                        {p.name}
-                      </Button>
-                    ))}
+                  {searchState === 'fallback' && (
+                    <p className="field-help">
+                      카카오맵에 연결할 수 없어 저장된 장소에서 찾고 있어요.
+                    </p>
+                  )}
                 </div>
                 {destination && (
                   <div className="setup-destination">
@@ -765,8 +1063,8 @@ export default function RunSetup({
                   </div>
                 )}
                 <p className="field-help">
-                  강릉 경포·초당·송정·안목 시범지역의 장소 {places.length}곳.
-                  영업과 실제 입구는 방문 전에 확인해 주세요.
+                  카카오맵의 강릉 장소를 검색해요. 저장된 {places.length}곳은
+                  API 연결 실패 시에만 보조 검색에 사용해요.
                 </p>
               </>
             )}

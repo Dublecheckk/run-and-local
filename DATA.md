@@ -4,7 +4,28 @@
 
 이 폴더의 OSM 원본과 가공 JSON은 **© OpenStreetMap contributors, ODbL-1.0**로 제공합니다. 앱 지도·데이터 설명에 출처와 [ODbL 라이선스 페이지](https://www.openstreetmap.org/copyright)를 표시하고, 공개 앱에서 사용하는 가공 데이터 `gangneung_graph.json`을 이용자가 내려받을 수 있도록 제공해야 합니다. Python 수집·정제 코드는 데이터 라이선스와 구분됩니다.
 
-## 스냅샷과 범위
+## 강릉시 전역 스냅샷과 범위
+
+- 강릉시 OSM 행정경계 relation `2537817`(Overpass area `3602537817`)을 기준으로 전역의 보행 후보 도로를 수집합니다.
+- 전역 그래프는 노드 **115,611개**, 구간 **119,797개**이며 최대 연결요소는 113,606개 노드입니다.
+- 앱 그래프의 실제 도로 좌표 범위는 `[128.5803929, 37.5086897, 129.073321, 37.9168765]`입니다. 행정경계 안에 OSM 도로가 없는 산악·해상 영역은 좌표 범위에 포함되지 않습니다.
+- `scripts/fetch-city-osm.py`가 공개 Overpass 서버에 부담을 주지 않도록 12개 구역을 순차 수집하고 체크포인트를 저장합니다. `scripts/build-city-graph.py`가 행정경계 밖으로 이어지는 way 구간을 다시 제거하고 그래프를 생성합니다.
+- 기존 경포·초당·송정·안목 구간의 지형·고도 자료는 보존합니다. 새 확장 구간은 OSM 해안·수변·녹지 근접 및 도로·트레일 태그를 반영하며, 고도와 경사는 자료 없음으로 처리합니다.
+
+전역 재생성 예시:
+
+```sh
+python3 scripts/fetch-city-osm.py --kind roads --output /tmp/gangneung-city-roads.json
+python3 scripts/fetch-city-osm.py --kind features --output /tmp/gangneung-city-features.json
+python3 scripts/build-city-graph.py \
+  --roads /tmp/gangneung-city-roads.json \
+  --features /tmp/gangneung-city-features.json \
+  --boundary scripts/data/gangneung-boundary.json \
+  --base public/data/gangneung.json \
+  --output public/data/gangneung.json
+```
+
+## 이전 시범권역 스냅샷
 
 - 수집: 2026-09-12 05:31:21 UTC / 14:31:21 KST.
 - OSM 데이터베이스 기준시각: **2026-09-12 05:29:50 UTC**. 개별 도로·상점의 현장 갱신일이라는 뜻은 아닙니다.
