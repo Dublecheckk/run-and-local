@@ -1,4 +1,8 @@
 'use client';
+
+import BackButton from './back-button';
+
+import { handlePlaceSearchEnter } from '@/lib/place-search';
 /* oxlint-disable next/no-img-element -- Local photos are also bundled in native apps without a Next image server. */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { currentPosition, exportFile } from '@/lib/device';
@@ -85,6 +89,9 @@ import {
   type RunnerProfile,
 } from '@/lib/profile';
 import type { PlaceCandidate } from '@/lib/destination-recommender';
+import DestinationChoice, {
+  type DestinationRequest,
+} from './destination-choice';
 
 type LocalPoi = Poi & {
   openingHours?: string | null;
@@ -206,6 +213,8 @@ export default function RunApp() {
   const [profileReady, setProfileReady] = useState(false);
   const [profileError, setProfileError] = useState('');
   const [setupStep, setSetupStep] = useState<number | null>(0);
+  const [destinationRequest, setDestinationRequest] =
+    useState<DestinationRequest | null>(null);
   const computeId = useRef(0);
   useEffect(() => {
     void Promise.resolve().then(() => {
@@ -329,12 +338,34 @@ export default function RunApp() {
     setNotice(`${regions[nextRegionId].name} 지도로 바꿨어요.`);
   }
   function update(patch: Partial<RouteInput>) {
+    setDestinationRequest(null);
     setPreviewOpen(false);
     computeId.current++;
     setBusy(false);
     setForm((v) => ({ ...v, ...patch }));
     setDirty(true);
     setNotice('');
+  }
+  function backFromApp() {
+    if (tab !== 'explore') setTab('explore');
+    else if (picking) {
+      setPicking(false);
+      setSheet('settings');
+    } else if (session) setNavigationOpen(true);
+    else {
+      setSetupStep(form.destinationId ? 3 : 2);
+    }
+    window.scrollTo({ top: 0 });
+  }
+  function selectDestination(patch: Partial<RouteInput>) {
+    const next = { ...form, ...patch };
+    update(patch);
+    if (router && next.destinationId)
+      setDestinationRequest({
+        id: computeId.current,
+        input: next,
+        recommend: false,
+      });
   }
   function selectOrigin(origin: RouteInput['origin'], label: string) {
     setOriginLabel(label);
@@ -375,24 +406,13 @@ export default function RunApp() {
   }, []);
   function calculate() {
     if (!router) return;
-    const id = ++computeId.current;
-    setBusy(true);
     setNotice('');
     setPicking(false);
-    setTimeout(() => {
-      if (id !== computeId.current) return;
-      try {
-        setResult(router.recommend(form));
-        setSubmitted(form);
-        setSelected(0);
-        setDirty(false);
-        setSheet(null);
-      } catch {
-        setNotice('계산에 실패했습니다. 조건을 확인하고 다시 시도해 주세요.');
-      } finally {
-        setBusy(false);
-      }
-    }, 35);
+    setDestinationRequest({
+      id: ++computeId.current,
+      input: form,
+      recommend: true,
+    });
   }
   function saveRecord(item: RunRecord) {
     try {
@@ -485,12 +505,19 @@ export default function RunApp() {
           if (!response.ok) throw new Error('Origin search failed');
           return response.json() as Promise<{ places: PlaceCandidate[] }>;
         })
-        .then(({ places }) => setOriginSearchResults(places))
+        .then(({ places }) => {
+          if (!abort.signal.aborted) setOriginSearchResults(places);
+        })
         .catch((error: unknown) => {
-          if (!(error instanceof DOMException && error.name === 'AbortError'))
+          if (
+            !abort.signal.aborted &&
+            !(error instanceof DOMException && error.name === 'AbortError')
+          )
             setOriginSearchResults([]);
         })
-        .finally(() => setOriginSearchBusy(false));
+        .finally(() => {
+          if (!abort.signal.aborted) setOriginSearchBusy(false);
+        });
     }, 300);
     return () => {
       clearTimeout(timer);
@@ -516,6 +543,7 @@ export default function RunApp() {
           return response.json() as Promise<{ places: PlaceCandidate[] }>;
         })
         .then(({ places }) => {
+          if (abort.signal.aborted) return;
           const mapped = places.map((place) => ({
             ...place,
             osmUrl: place.placeUrl ?? '',
@@ -527,7 +555,10 @@ export default function RunApp() {
           mergePlaces(places);
         })
         .catch((error: unknown) => {
-          if (!(error instanceof DOMException && error.name === 'AbortError'))
+          if (
+            !abort.signal.aborted &&
+            !(error instanceof DOMException && error.name === 'AbortError')
+          )
             setPlaceSearchState('fallback');
         });
     }, 300);
@@ -642,26 +673,47 @@ export default function RunApp() {
   }
   const sessionSeconds = session ? Math.floor(elapsed(session, now) / 1000) : 0;
   const timerText = `${String(Math.floor(sessionSeconds / 3600)).padStart(2, '0')}:${String(Math.floor(sessionSeconds / 60) % 60).padStart(2, '0')}:${String(sessionSeconds % 60).padStart(2, '0')}`;
-  function completeSetup() {
+  function commitRecommendation(
+    input: RouteInput,
+    recommendation: RecommendationResult,
+  ) {
     try {
-      const next = parseProfile(
-        JSON.stringify({ ...draftProfile, paceMinKm: form.paceMinKm }),
-      );
-      if (!next) return;
-      saveProfile(localStorage, next);
-      setProfileError('');
-      setProfile(next);
-      setDraftProfile(next);
+      if (setupStep !== null) {
+        const next = parseProfile(
+          JSON.stringify({ ...draftProfile, paceMinKm: input.paceMinKm }),
+        );
+        if (!next) return;
+        saveProfile(localStorage, next);
+        setProfileError('');
+        setProfile(next);
+        setDraftProfile(next);
+      }
+      setDestinationRequest(null);
       setSetupStep(null);
+      setForm(input);
+      setSubmitted(input);
+      setResult(recommendation);
+      setSelected(0);
+      setDirty(false);
+      setSheet(null);
       setTab('explore');
-      setDirty(true);
-      calculate();
     } catch (e) {
+      setDestinationRequest(null);
       setNotice(
         e instanceof Error ? e.message : '기기 프로필을 저장하지 못했어요.',
       );
     }
   }
+  const distanceDialog = (
+    <DestinationChoice
+      key={destinationRequest?.id ?? 0}
+      request={destinationRequest}
+      graph={graph}
+      router={router}
+      onDismiss={() => setDestinationRequest(null)}
+      onProceed={commitRecommendation}
+    />
+  );
   if (!profileReady)
     return (
       <div className="loading-screen">
@@ -671,41 +723,56 @@ export default function RunApp() {
     );
   if (setupStep !== null && !session)
     return (
-      <RunSetup
-        key={setupStep}
-        cityName={region.city}
-        initialStep={setupStep}
-        graph={graph}
-        profile={draftProfile}
-        form={form}
-        update={update}
-        onProfile={setDraftProfile}
-        onComplete={completeSetup}
-        onClose={
-          profile || records.length
-            ? () => {
-                setSetupStep(null);
-                if (!result) setTab('records');
-              }
-            : undefined
-        }
-        locate={() => void locate(false)}
-        locationBusy={locationBusy}
-        notice={notice || profileError}
-        loadError={loadError}
-        onPlaces={mergePlaces}
-        originLabel={originLabel}
-        onOriginLabel={setOriginLabel}
-      />
+      <>
+        <RunSetup
+          key={setupStep}
+          cityName={region.city}
+          initialStep={setupStep}
+          graph={graph}
+          profile={draftProfile}
+          form={form}
+          update={update}
+          onDestination={selectDestination}
+          onProfile={setDraftProfile}
+          onComplete={calculate}
+          onClose={
+            profile || records.length
+              ? () => {
+                  setSetupStep(null);
+                  if (!result) setTab('records');
+                }
+              : undefined
+          }
+          locate={() => void locate(false)}
+          locationBusy={locationBusy}
+          notice={notice || profileError}
+          loadError={loadError}
+          onPlaces={mergePlaces}
+          originLabel={originLabel}
+          onOriginLabel={setOriginLabel}
+        />
+        {distanceDialog}
+      </>
     );
   return (
     <div className="phone-app">
+      {distanceDialog}
       {!(
         graph &&
         ((session && navigationOpen) || (previewOpen && route && !dirty))
       ) && (
         <>
           <header className="app-header">
+            <BackButton
+              onClick={backFromApp}
+              label={
+                tab !== 'explore'
+                  ? '이전: 코스 탐색으로'
+                  : session
+                    ? '이전: 진행 중인 러닝 지도로'
+                    : '이전: 러닝 조건 입력으로'
+              }
+            />
             <button
               className="wordmark"
               onClick={() => setTab('explore')}
@@ -1330,8 +1397,10 @@ export default function RunApp() {
           if (!open) setSheet(null);
         }}
       >
-        <DialogContent className="mobile-sheet">
-          <div className="sheet-handle" />
+        <DialogContent className="mobile-sheet" showCloseButton={false}>
+          <div className="back-toolbar">
+            <BackButton onClick={() => setSheet(null)} />
+          </div>
           {sheet === 'settings' && (
             <>
               <DialogTitle>오늘의 러닝 설정</DialogTitle>
@@ -1373,6 +1442,8 @@ export default function RunApp() {
                       </SelectContent>
                     </Select>
                     <Combobox
+                      autoHighlight
+                      filter={null}
                       items={
                         originQuery.trim().length < 2 ? [] : originSearchResults
                       }
@@ -1381,12 +1452,18 @@ export default function RunApp() {
                         a: PlaceCandidate,
                         b: PlaceCandidate,
                       ) => a.id === b.id}
-                      onInputValueChange={setOriginQuery}
+                      onInputValueChange={(query) => {
+                        if (query === originQuery) return;
+                        setOriginQuery(query);
+                        setOriginSearchResults([]);
+                        setOriginSearchBusy(query.trim().length >= 2);
+                      }}
                       onValueChange={(place: PlaceCandidate | null) => {
                         if (place) selectOriginPlace(place);
                       }}
                     >
                       <ComboboxInput
+                        onKeyDown={handlePlaceSearchEnter}
                         aria-label="출발 장소 검색"
                         placeholder="카카오맵에서 출발 장소 검색"
                         showTrigger={false}
@@ -1407,7 +1484,6 @@ export default function RunApp() {
                             <ComboboxItem
                               key={place.id}
                               value={place}
-                              onClick={() => selectOriginPlace(place)}
                               className={
                                 isSupportedOrigin(place)
                                   ? 'supported-place'
@@ -1486,16 +1562,26 @@ export default function RunApp() {
                 )}
               </div>
               <Combobox
+                autoHighlight
+                filter={null}
                 items={searchedPois}
                 value={destination}
                 itemToStringLabel={(p) => p.name}
                 isItemEqualToValue={(a, b) => a.id === b.id}
-                onInputValueChange={setPlaceQuery}
+                onInputValueChange={(query) => {
+                  if (query === placeQuery) return;
+                  setPlaceQuery(query);
+                  setPlaceSearchResults([]);
+                  setPlaceSearchState(
+                    query.trim().length >= 2 ? 'loading' : 'idle',
+                  );
+                }}
                 onValueChange={(value) => {
-                  if (value) update({ destinationId: value.id });
+                  if (value) selectDestination({ destinationId: value.id });
                 }}
               >
                 <ComboboxInput
+                  onKeyDown={handlePlaceSearchEnter}
                   aria-label="목적지 이름 검색"
                   placeholder="카페, 식당, 공원 검색"
                   showTrigger={false}
@@ -1729,8 +1815,13 @@ export default function RunApp() {
           if (!open) setFinish(null);
         }}
       >
-        <DialogContent className="mobile-sheet finish-sheet">
-          <div className="sheet-handle" />
+        <DialogContent
+          className="mobile-sheet finish-sheet"
+          showCloseButton={false}
+        >
+          <div className="back-toolbar">
+            <BackButton onClick={() => setFinish(null)} />
+          </div>
           <div className="finish-medal">
             <Check size={30} />
           </div>

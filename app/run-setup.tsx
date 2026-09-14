@@ -1,8 +1,11 @@
 'use client';
+
+import BackButton from './back-button';
+
+import { handlePlaceSearchEnter } from '@/lib/place-search';
 /* oxlint-disable next/no-img-element -- The same local assets run inside the native app. */
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ArrowLeft,
   ArrowRight,
   Camera,
   Check,
@@ -138,6 +141,51 @@ export function Choice<T extends string>({
   );
 }
 
+export function RunTargetDistance({
+  form,
+  update,
+}: {
+  form: RouteInput;
+  update: (patch: Partial<RouteInput>) => void;
+}) {
+  const target = form.targetDistanceKm ?? 5;
+  const choose = (km: number) =>
+    update({
+      targetDistanceKm: km,
+      maxDistanceKm: Math.max(form.maxDistanceKm, km),
+    });
+  return (
+    <div className="distance-setting">
+      <p id="target-distance-label">오늘 뛰고 싶은 거리</p>
+      <strong>
+        {target}
+        <small>km</small>
+      </strong>
+      <div className="distance-presets">
+        {[3, 5, 8, 10].map((km) => (
+          <Button
+            key={km}
+            variant={target === km ? 'default' : 'outline'}
+            onClick={() => choose(km)}
+            aria-pressed={target === km}
+          >
+            {km}km
+          </Button>
+        ))}
+      </div>
+      <Slider
+        aria-labelledby="target-distance-label"
+        value={[target]}
+        min={1}
+        max={20}
+        step={0.5}
+        onValueChange={(v) => choose(Array.isArray(v) ? v[0] : v)}
+      />
+      <p>목표와 가까운 코스를 찾고, 차이를 보여드려요.</p>
+    </div>
+  );
+}
+
 export function RunPreferences({
   form,
   update,
@@ -149,36 +197,7 @@ export function RunPreferences({
   const plannedBase = target * form.paceMinKm * 1.1 + form.pauseMinutes;
   return (
     <div className="run-preferences">
-      <div className="distance-setting">
-        <p id="target-distance-label">오늘 뛰고 싶은 거리</p>
-        <strong>
-          {target}
-          <small>km</small>
-        </strong>
-        <div className="distance-presets">
-          {[3, 5, 8, 10].map((km) => (
-            <Button
-              key={km}
-              variant={target === km ? 'default' : 'outline'}
-              onClick={() => update({ targetDistanceKm: km })}
-              aria-pressed={target === km}
-            >
-              {km}km
-            </Button>
-          ))}
-        </div>
-        <Slider
-          aria-labelledby="target-distance-label"
-          value={[target]}
-          min={1}
-          max={20}
-          step={0.5}
-          onValueChange={(v) =>
-            update({ targetDistanceKm: Array.isArray(v) ? v[0] : v })
-          }
-        />
-        <p>목표와 가까운 코스를 찾고, 차이를 보여드려요.</p>
-      </div>
+      <RunTargetDistance form={form} update={update} />
       <fieldset className="theme-setting">
         <legend>어떤 길이 끌리나요?</legend>
         <div className="theme-options">
@@ -448,6 +467,7 @@ export default function RunSetup({
   form,
   update,
   onProfile,
+  onDestination,
   onComplete,
   onClose,
   locate,
@@ -464,6 +484,7 @@ export default function RunSetup({
   profile: RunnerProfile;
   form: RouteInput;
   update: (patch: Partial<RouteInput>) => void;
+  onDestination: (patch: Partial<RouteInput>) => void;
   onProfile: (profile: RunnerProfile) => void;
   onComplete: () => void;
   onClose?: () => void;
@@ -538,11 +559,15 @@ export default function RunSetup({
           if (!response.ok) throw new Error();
           return response.json() as Promise<{ places: PlaceCandidate[] }>;
         })
-        .then(({ places }) => setOriginResults(places))
-        .catch((reason) => {
-          if (reason?.name !== 'AbortError') setOriginResults([]);
+        .then(({ places }) => {
+          if (!abort.signal.aborted) setOriginResults(places);
         })
-        .finally(() => setOriginSearchBusy(false));
+        .catch(() => {
+          if (!abort.signal.aborted) setOriginResults([]);
+        })
+        .finally(() => {
+          if (!abort.signal.aborted) setOriginSearchBusy(false);
+        });
     }, 300);
     return () => {
       clearTimeout(timer);
@@ -563,13 +588,14 @@ export default function RunSetup({
           const data = (await response.json()) as {
             places?: PlaceCandidate[];
           };
-          if (!response.ok || !data.places?.length) throw new Error();
+          if (abort.signal.aborted) return;
+          if (!response.ok || !data.places) throw new Error();
           setSearchPlaces(data.places);
           setSearchState('kakao');
           onPlaces(data.places);
         })
         .catch((reason) => {
-          if (reason?.name === 'AbortError') return;
+          if (abort.signal.aborted || reason?.name === 'AbortError') return;
           setSearchPlaces([]);
           setSearchState('fallback');
         });
@@ -690,6 +716,7 @@ export default function RunSetup({
   }
   const go = (next: number) => {
     setError('');
+    setMapOpen(false);
     setStep(next);
     window.scrollTo({ top: 0 });
   };
@@ -721,14 +748,10 @@ export default function RunSetup({
     <div className={`run-setup ${step === 0 ? 'welcome-setup' : ''}`}>
       <header className="setup-header">
         {step > 0 ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="이전 단계"
-            onClick={() => go(step - 1)}
-          >
-            <ArrowLeft size={21} />
-          </Button>
+          <BackButton
+            label={mapOpen ? '이전: 출발지 지도 닫기' : '이전 단계로 돌아가기'}
+            onClick={() => (mapOpen ? setMapOpen(false) : go(step - 1))}
+          />
         ) : (
           <span />
         )}
@@ -885,8 +908,9 @@ export default function RunSetup({
             <p className="overline">WHERE SHALL WE GO?</p>
             <h1>어디까지 달려볼까요?</h1>
             <p className="setup-intro">
-              출발점부터 고르고, 달리기 끝에 만나고 싶은 곳을 찾아요.
+              오늘 목표 거리를 정하고, 달리기 끝에 만나고 싶은 곳을 찾아요.
             </p>
+            <RunTargetDistance form={form} update={update} />
             {!graph ? (
               <p className="setup-loading">
                 {loadError || `${cityName}의 장소를 불러오고 있어요…`}
@@ -924,18 +948,26 @@ export default function RunSetup({
                     </SelectContent>
                   </Select>
                   <Combobox
+                    autoHighlight
+                    filter={null}
                     items={originQuery.trim().length < 2 ? [] : originResults}
                     itemToStringLabel={(place: PlaceCandidate) => place.name}
                     isItemEqualToValue={(
                       a: PlaceCandidate,
                       b: PlaceCandidate,
                     ) => a.id === b.id}
-                    onInputValueChange={setOriginQuery}
+                    onInputValueChange={(query) => {
+                      if (query === originQuery) return;
+                      setOriginQuery(query);
+                      setOriginResults([]);
+                      setOriginSearchBusy(query.trim().length >= 2);
+                    }}
                     onValueChange={(place: PlaceCandidate | null) => {
                       if (place) chooseOrigin(place);
                     }}
                   >
                     <ComboboxInput
+                      onKeyDown={handlePlaceSearchEnter}
                       aria-label="출발 장소 검색"
                       placeholder="카카오맵에서 출발 장소 검색"
                       showTrigger={false}
@@ -956,7 +988,6 @@ export default function RunSetup({
                           <ComboboxItem
                             key={place.id}
                             value={place}
-                            onClick={() => chooseOrigin(place)}
                             className={
                               originSupport.get(place.id)
                                 ? 'supported-place'
@@ -1081,7 +1112,7 @@ export default function RunSetup({
                           key={p.id}
                           className={`destination-card${destination?.id === p.id ? ' selected' : ''}`}
                           onClick={() =>
-                            update({
+                            onDestination({
                               destinationId: p.id,
                               ...(p.adjustment
                                 ? { theme: 'any', scenery: 'any' }
@@ -1135,16 +1166,26 @@ export default function RunSetup({
                     또는 목적지 직접 검색
                   </label>
                   <Combobox
+                    autoHighlight
+                    filter={null}
                     items={directPlaces}
                     value={destination}
                     itemToStringLabel={(p: Poi) => p.name}
                     isItemEqualToValue={(a, b) => a.id === b.id}
                     onValueChange={(p) => {
-                      if (p) update({ destinationId: p.id });
+                      if (p) onDestination({ destinationId: p.id });
                     }}
-                    onInputValueChange={setPlaceQuery}
+                    onInputValueChange={(query) => {
+                      if (query === placeQuery) return;
+                      setPlaceQuery(query);
+                      setSearchPlaces([]);
+                      setSearchState(
+                        query.trim().length >= 2 ? 'loading' : 'idle',
+                      );
+                    }}
                   >
                     <ComboboxInput
+                      onKeyDown={handlePlaceSearchEnter}
                       aria-label="목적지 검색"
                       id="setup-destination-search"
                       placeholder="카페·식당·공원 이름 검색"

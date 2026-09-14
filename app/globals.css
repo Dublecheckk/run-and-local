@@ -96,7 +96,9 @@
 .app-header {
   height: calc(74px + var(--safe-top));
   padding: var(--safe-top) 24px 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 8px;
   align-items: center;
   justify-content: space-between;
   background: #eff7e6;
@@ -104,6 +106,47 @@
   position: sticky;
   top: 0;
   z-index: 20;
+}
+.app-header .wordmark {
+  justify-self: center;
+  font-size: 18px;
+  white-space: nowrap;
+}
+.back-button {
+  min-width: 72px;
+  min-height: 44px;
+  height: 44px;
+  padding: 0 10px;
+  gap: 5px;
+  border: 1px solid #c5d4b8;
+  border-radius: 14px;
+  background: #fff;
+  color: #203e30;
+  font-size: 14px;
+  font-weight: 750;
+  box-shadow: 0 2px 5px #203e3008;
+  flex-shrink: 0;
+}
+.back-button:hover {
+  background: #edf4e4;
+}
+.back-button:focus-visible {
+  outline: 3px solid #6c862d;
+  outline-offset: 2px;
+}
+.back-button svg {
+  width: 20px;
+  height: 20px;
+}
+.back-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0 8px;
+  background: var(--paper);
 }
 .wordmark {
   font-size: 21px;
@@ -1166,6 +1209,133 @@
   line-height: 1.5;
   margin-top: 6px;
 }
+.distance-choice {
+  max-height: calc(100svh - 48px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--paper);
+  padding: 24px;
+  border-radius: 26px;
+  gap: 14px;
+}
+.distance-choice [data-slot='dialog-title'] {
+  font-size: 23px;
+  font-weight: 800;
+  line-height: 1.4;
+  letter-spacing: -0.7px;
+  word-break: keep-all;
+}
+.distance-choice [data-slot='dialog-description'] {
+  font-size: 14px;
+  line-height: 1.6;
+}
+.distance-choice-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 18px;
+  background: #e8f3ca;
+  color: #395623;
+}
+.distance-comparison {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  background: #f0f3e9;
+  border-radius: 18px;
+  padding: 18px;
+}
+.distance-comparison > div {
+  display: grid;
+  gap: 4px;
+}
+.distance-comparison small {
+  font-size: 12px;
+  color: #66765c;
+}
+.distance-comparison strong {
+  font-size: 33px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.distance-comparison strong span {
+  font-size: 15px;
+  padding-left: 4px;
+}
+.distance-comparison > div:last-child strong {
+  color: #526f20;
+}
+.distance-context {
+  font-size: 13px;
+  line-height: 1.65;
+}
+.distance-context svg,
+.distance-consent-details svg {
+  display: inline;
+  vertical-align: middle;
+}
+.distance-disclaimer {
+  color: #73816a;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.distance-consent-details {
+  display: grid;
+  gap: 6px;
+  border-left: 3px solid #b3ce77;
+  padding-left: 12px;
+  font-size: 14px;
+}
+.distance-consent-details small {
+  color: #73816a;
+  font-size: 12px;
+}
+.distance-choice > button {
+  width: 100%;
+  white-space: normal;
+  min-height: 46px;
+  height: auto;
+  padding: 12px;
+}
+.distance-progress {
+  padding: 20px 0;
+  color: #66765c;
+}
+.distance-alternatives {
+  display: grid;
+  gap: 10px;
+}
+.distance-alternatives button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  width: 100%;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid #dce4cf;
+  background: #f4f7ef;
+}
+.distance-alternatives button:hover {
+  background: #eaf2dd;
+}
+.distance-alternatives button:focus-visible {
+  outline: 3px solid #6c862d;
+  outline-offset: 2px;
+}
+.distance-alternatives button span {
+  display: grid;
+  gap: 5px;
+}
+.distance-alternatives strong {
+  font-size: 16px;
+}
+.distance-alternatives small {
+  font-size: 13px;
+  color: #66765c;
+}
 .place-detail > span {
   font-size: 12px;
   color: #789263;
@@ -1475,13 +1645,18 @@ body:has(.embedded-app) {
   min-height: calc(66px + var(--safe-top));
   padding: var(--safe-top) 18px 0;
   display: grid;
-  grid-template-columns: 50px 1fr 50px;
+  grid-template-columns: 72px minmax(0, 1fr) 72px;
   align-items: center;
   justify-items: center;
 }
 .setup-header > button {
   padding: 0;
   font-size: 13px;
+}
+.setup-header > .back-button {
+  padding: 0 10px;
+  font-size: 14px;
+  justify-self: start;
 }
 .setup-header .wordmark {
   font-size: 19px;

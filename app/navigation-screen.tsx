@@ -1,8 +1,9 @@
 'use client';
+
+import BackButton from './back-button';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { App } from '@capacitor/app';
 import {
-  ArrowLeft,
   LocateFixed,
   Maximize,
   Pause,
@@ -188,17 +189,15 @@ export default function NavigationScreen(props: Props) {
     >
       <header className="navigation-header">
         <div className="navigation-topline">
-          <Button
+          <BackButton
             ref={back}
-            variant="ghost"
-            size="icon"
             onClick={props.onBack}
-            aria-label={
-              timer ? '지도를 접고 코스 목록으로' : '코스 목록으로 돌아가기'
+            label={
+              timer
+                ? '이전: 지도를 접고 코스 목록으로'
+                : '이전: 코스 목록으로 돌아가기'
             }
-          >
-            <ArrowLeft size={21} />
-          </Button>
+          />
           <span>
             <i className={timer && !paused ? 'is-running' : ''} />
             {timer
