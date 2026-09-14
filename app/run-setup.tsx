@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  Camera,
   Check,
+  Coffee,
   LocateFixed,
   MapPin,
   Mountain,
@@ -15,6 +17,7 @@ import {
   Route,
   Search,
   Timer,
+  UtensilsCrossed,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -79,6 +82,24 @@ const experiences = {
   regular: ['꾸준히 달려요', '가끔 5~10km를 달려요'],
   experienced: ['러닝이 익숙해요', '거리와 페이스를 조절해요'],
 };
+const runKindPresentation = {
+  coffee: {
+    icon: Coffee,
+    prompt: '커피 한 잔을 향해',
+  },
+  food: {
+    icon: UtensilsCrossed,
+    prompt: '맛있는 도착을 향해',
+  },
+  park: {
+    icon: Trees,
+    prompt: '초록 쉼표를 향해',
+  },
+  sightseeing: {
+    icon: Camera,
+    prompt: '강릉의 장면을 향해',
+  },
+} as const;
 
 export function Choice<T extends string>({
   label,
@@ -957,21 +978,38 @@ export default function RunSetup({
                   </div>
                 )}
                 <div className="form-field destination-setup">
-                  <fieldset className="quick-places">
+                  <fieldset className="run-kind-grid">
                     <legend>오늘 어떤 런을 할까요?</legend>
-                    {Object.entries(RUN_KINDS).map(([key, item]) => (
-                      <Button
-                        key={key}
-                        variant={runKind === key ? 'secondary' : 'outline'}
-                        onClick={() => setRunKind(key as RunKind)}
-                      >
-                        {item.label}
-                      </Button>
-                    ))}
+                    {Object.entries(RUN_KINDS).map(([key, item]) => {
+                      const presentation = runKindPresentation[key as RunKind];
+                      const Icon = presentation.icon;
+                      return (
+                        <Button
+                          key={key}
+                          type="button"
+                          className="run-kind-card"
+                          data-kind={key}
+                          aria-pressed={runKind === key}
+                          variant="outline"
+                          onClick={() => setRunKind(key as RunKind)}
+                        >
+                          <span className="run-kind-icon">
+                            <Icon aria-hidden size={19} />
+                          </span>
+                          <span>
+                            <strong>{item.label}</strong>
+                            <small>{presentation.prompt}</small>
+                          </span>
+                          {runKind === key && (
+                            <Check className="run-kind-check" size={15} />
+                          )}
+                        </Button>
+                      );
+                    })}
                   </fieldset>
                   <Button
                     type="button"
-                    variant="outline"
+                    className="destination-recommend-action"
                     disabled={placeBusy}
                     onClick={() => void suggestDestinations()}
                   >
@@ -981,13 +1019,22 @@ export default function RunSetup({
                       : '내 조건에 맞는 목적지 추천'}
                   </Button>
                   {suggestedPlaces.length > 0 && (
-                    <div className="quick-places">
+                    <section
+                      className="destination-recommendations"
+                      aria-label="추천 목적지"
+                    >
+                      <div className="recommendation-heading">
+                        <div>
+                          <span>RUN &amp; LOCAL PICKS</span>
+                          <h2>오늘의 목적지</h2>
+                        </div>
+                        <small>실제 보행 경로 확인 완료</small>
+                      </div>
                       {suggestedPlaces.map((p, index) => (
-                        <Button
+                        <button
+                          type="button"
                           key={p.id}
-                          variant={
-                            destination?.id === p.id ? 'secondary' : 'outline'
-                          }
+                          className={`destination-card${destination?.id === p.id ? ' selected' : ''}`}
                           onClick={() =>
                             update({
                               destinationId: p.id,
@@ -1000,17 +1047,44 @@ export default function RunSetup({
                             })
                           }
                         >
-                          {index + 1}순위 · {p.name} ·{' '}
-                          {p.actualCourseKm.toFixed(1)}km ·{' '}
-                          {Math.round(p.actualMinutes)}분
-                          {p.adjustment === 'theme'
-                            ? ' · 테마 유연'
-                            : p.adjustment === 'out_and_back'
-                              ? ' · 왕복 대안'
-                              : ''}
-                        </Button>
+                          <span className="destination-card-topline">
+                            <span className="rank-badge">
+                              {index + 1}순위 · {RUN_KINDS[runKind].label}
+                            </span>
+                            {p.adjustment && (
+                              <span className="adjustment-badge">
+                                {p.adjustment === 'theme'
+                                  ? '테마 유연'
+                                  : '왕복 대안'}
+                              </span>
+                            )}
+                          </span>
+                          <span className="destination-card-title">
+                            <strong>{p.name}</strong>
+                            {destination?.id === p.id && (
+                              <Check aria-label="선택됨" size={18} />
+                            )}
+                          </span>
+                          <span className="destination-card-copy">
+                            {p.address || p.reasons[2]}
+                          </span>
+                          <span className="destination-metrics">
+                            <span>
+                              <strong>{p.actualCourseKm.toFixed(1)}</strong>
+                              <small>KM</small>
+                            </span>
+                            <span>
+                              <strong>{Math.round(p.actualMinutes)}</strong>
+                              <small>MIN</small>
+                            </span>
+                            <span>
+                              <strong>{Math.round(p.score)}</strong>
+                              <small>FIT</small>
+                            </span>
+                          </span>
+                        </button>
                       ))}
-                    </div>
+                    </section>
                   )}
                   <label htmlFor="setup-destination-search">
                     또는 목적지 직접 검색
