@@ -164,6 +164,16 @@ export type RecommendationResult = {
     searchedPaths: number;
   };
 };
+export type DestinationDistanceResult = {
+  status: RecommendationResult['status'];
+  message: string;
+  snaps: RecommendationResult['snaps'];
+  oneWayMeters: number | null;
+  /** Distance lower bound for the selected shape, including unverified connectors. */
+  minimumCourseMeters: number | null;
+  /** Unverified straight connectors included in minimumCourseMeters. */
+  connectorMeters: number;
+};
 type Arc = { from: number; to: number; edge: number };
 type Path = Arc[];
 const BASE_WEIGHTS = {
@@ -188,6 +198,59 @@ const RUNNER_WEIGHTS = {
   comfort: 0.05,
   lighting: 0.05,
 };
+export function scoreFeatures(features: Features, input: RouteInput) {
+  const baseWeights =
+    input.targetDistanceKm !== undefined ||
+    input.theme !== undefined ||
+    input.hillPreference !== undefined ||
+    input.surfacePreference !== undefined ||
+    input.timeOfDay === 'night'
+      ? RUNNER_WEIGHTS
+      : BASE_WEIGHTS;
+  const keys = Object.keys(baseWeights) as (keyof Features)[];
+  const weightSum = keys.reduce(
+    (sum, feature) =>
+      sum + (features[feature] === null ? 0 : baseWeights[feature]),
+    0,
+  );
+  const weights = Object.fromEntries(
+    keys.map((feature) => [
+      feature,
+      features[feature] === null ? 0 : baseWeights[feature] / weightSum,
+    ]),
+  ) as Record<keyof Features, number>;
+  const score =
+    100 *
+    keys.reduce(
+      (sum, feature) => sum + weights[feature] * (features[feature] ?? 0),
+      0,
+    );
+  return { weights, score };
+}
+
+export function routeBudgetFeatures(
+  input: RouteInput,
+  metres: number,
+  buffered: number,
+) {
+  return {
+    time: clamp(
+      (buffered - input.pauseMinutes) / (input.minutes - input.pauseMinutes),
+    ),
+    distance:
+      input.targetDistanceKm !== undefined
+        ? clamp(
+            1 -
+              Math.abs(metres - input.targetDistanceKm * 1000) /
+                (input.targetDistanceKm * 1000),
+          )
+        : null,
+  };
+}
+
+export function routeDistanceReason(input: RouteInput, metres: number) {
+  return `목표 ${input.targetDistanceKm}km 대비 ${((metres - input.targetDistanceKm! * 1000) / 1000).toFixed(2)}km · 최대 ${input.maxDistanceKm}km 이내`;
+}
 const majorRoads = new Set([
   'primary',
   'primary_link',
@@ -751,6 +814,95 @@ export function createRouter(data: GraphData) {
       elevationProfile: sampled,
     };
   }
+  function resolveEndpoints(input: RouteInput): {
+    status: 'ok' | 'unsupported_location';
+    message: string;
+    snaps: RecommendationResult['snaps'];
+  } {
+    let origin: Snap | null = null;
+    if ('nodeId' in input.origin) {
+      const i = index.get(input.origin.nodeId);
+      if (
+        i !== undefined &&
+        canVisit(i) &&
+        withinBounds(nodes[i].lon, nodes[i].lat)
+      )
+        origin = {
+          nodeId: nodes[i].id,
+          lon: nodes[i].lon,
+          lat: nodes[i].lat,
+          distanceMeters: 0,
+          requested: coordinates[i],
+        };
+    } else origin = snap(input.origin);
+    const poi = pois.get(input.destinationId),
+      destination = poi ? snap(poi) : null;
+    const snaps = origin && destination ? { origin, destination } : null;
+    if (
+      !origin ||
+      !destination ||
+      origin.distanceMeters > MAX_ORIGIN_GAP ||
+      destination.distanceMeters > MAX_DESTINATION_GAP
+    ) {
+      return {
+        status: 'unsupported_location',
+        snaps,
+        message: !origin
+          ? '출발지가 지원 지도 밖에 있거나 보행 연결점을 찾을 수 없습니다.'
+          : !destination
+            ? '이 목적지는 현재 지도에서 지원하지 않습니다.'
+            : '출발지 또는 목적지가 지도상의 보행 연결점에서 너무 멉니다. 다른 지점을 선택해 주세요.',
+      };
+    }
+    return { status: 'ok', message: '', snaps };
+  }
+  function destinationDistance(input: RouteInput): DestinationDistanceResult {
+    const result: DestinationDistanceResult = {
+      status: 'invalid_input',
+      message: '',
+      snaps: null,
+      oneWayMeters: null,
+      minimumCourseMeters: null,
+      connectorMeters: 0,
+    };
+    const error = validateRouteInput(input);
+    if (error) return { ...result, message: error };
+    const endpoints = resolveEndpoints(input);
+    if (endpoints.status !== 'ok' || !endpoints.snaps)
+      return { ...result, ...endpoints };
+    const { origin, destination } = endpoints.snaps;
+    const start = index.get(origin.nodeId)!,
+      end = index.get(destination.nodeId)!;
+    const connector = origin.distanceMeters + destination.distanceMeters;
+    result.snaps = endpoints.snaps;
+    result.connectorMeters = connector * (input.mode === 'one_way' ? 1 : 2);
+    // Only hard exclusions apply: this measures metres before the user's time/distance budget.
+    const outward = search(start, end, { input }).dist[end];
+    if (Number.isFinite(outward)) result.oneWayMeters = outward + connector;
+    let course = outward;
+    if (input.mode === 'out_and_back' && Number.isFinite(outward)) {
+      // recommend requires the return trip to use the same edge in reverse.
+      const banned = new Set(
+        edges.flatMap((edge, i) => (edge.bidirectional ? [] : [i])),
+      );
+      course = search(start, end, { input, banned }).dist[end] * 2;
+    } else if (input.mode === 'loop' && Number.isFinite(outward)) {
+      // This is a lower bound; it does not promise a loop with <=25% repeated edges.
+      course += search(end, start, { input }).dist[start];
+    }
+    if (!Number.isFinite(course))
+      return {
+        ...result,
+        status: 'no_route',
+        message:
+          '선택한 제외 조건과 코스 형태로 연결되는 보행 경로를 찾지 못했어요.',
+      };
+    return {
+      ...result,
+      status: 'ok',
+      minimumCourseMeters: course + result.connectorMeters,
+    };
+  }
   function recommend(input: RouteInput): RecommendationResult {
     const diagnostics = {
       generated: 0,
@@ -770,42 +922,11 @@ export function createRouter(data: GraphData) {
     const invalid = (message: string) => ({ ...result, message });
     const error = validateRouteInput(input);
     if (error) return invalid(error);
-    let origin: Snap | null = null;
-    if ('nodeId' in input.origin) {
-      const i = index.get(input.origin.nodeId);
-      if (
-        i !== undefined &&
-        canVisit(i) &&
-        withinBounds(nodes[i].lon, nodes[i].lat)
-      )
-        origin = {
-          nodeId: nodes[i].id,
-          lon: nodes[i].lon,
-          lat: nodes[i].lat,
-          distanceMeters: 0,
-          requested: coordinates[i],
-        };
-    } else origin = snap(input.origin);
-    const poi = pois.get(input.destinationId),
-      destination = poi ? snap(poi) : null;
-    if (origin && destination) result.snaps = { origin, destination };
-    if (
-      !origin ||
-      !destination ||
-      origin.distanceMeters > MAX_ORIGIN_GAP ||
-      destination.distanceMeters > MAX_DESTINATION_GAP
-    ) {
-      return {
-        ...result,
-        status: 'unsupported_location',
-        message: !origin
-          ? '출발지가 지원 지도 밖에 있거나 보행 연결점을 찾을 수 없습니다.'
-          : !destination
-            ? '이 목적지는 현재 지도에서 지원하지 않습니다.'
-            : '출발지 또는 목적지가 지도상의 보행 연결점에서 너무 멉니다. 다른 지점을 선택해 주세요.',
-      };
-    }
-    result.snaps = { origin, destination };
+    const endpoints = resolveEndpoints(input);
+    if (endpoints.status !== 'ok' || !endpoints.snaps)
+      return { ...result, ...endpoints };
+    const { origin, destination } = endpoints.snaps;
+    result.snaps = endpoints.snaps;
     const start = index.get(origin.nodeId)!,
       end = index.get(destination.nodeId)!;
     const factor = input.mode === 'one_way' ? 1 : 2;
@@ -1056,10 +1177,7 @@ export function createRouter(data: GraphData) {
         geometry.some((c) => distanceMeters(c, [p.lon, p.lat]) <= 60),
       );
       const features: Features = {
-        time: clamp(
-          (buffered - input.pauseMinutes) /
-            (input.minutes - input.pauseMinutes),
-        ),
+        ...routeBudgetFeatures(input, metres, buffered),
         scenery:
           (input.theme && input.theme !== 'any') ||
           input.scenery === 'any' ||
@@ -1070,14 +1188,6 @@ export function createRouter(data: GraphData) {
           ? Math.min(1, nearbyAmenities.length / 3)
           : null,
         comfort: comfortKnown ? comfortSum / comfortKnown : null,
-        distance:
-          input.targetDistanceKm !== undefined
-            ? clamp(
-                1 -
-                  Math.abs(metres - input.targetDistanceKm * 1000) /
-                    (input.targetDistanceKm * 1000),
-              )
-            : null,
         terrain: input.theme && input.theme !== 'any' ? themeShare : null,
         slope:
           input.hillPreference && terrain.averageGradePercent !== null
@@ -1102,31 +1212,7 @@ export function createRouter(data: GraphData) {
             ? terrain.litRatio
             : null,
       };
-      const baseWeights =
-        input.targetDistanceKm !== undefined ||
-        input.theme !== undefined ||
-        input.hillPreference !== undefined ||
-        input.surfacePreference !== undefined ||
-        input.timeOfDay === 'night'
-          ? RUNNER_WEIGHTS
-          : BASE_WEIGHTS;
-      const weightSum = (Object.keys(baseWeights) as (keyof Features)[]).reduce(
-        (sum, feature) =>
-          sum + (features[feature] === null ? 0 : baseWeights[feature]),
-        0,
-      );
-      const weights = Object.fromEntries(
-        (Object.keys(baseWeights) as (keyof Features)[]).map((feature) => [
-          feature,
-          features[feature] === null ? 0 : baseWeights[feature] / weightSum,
-        ]),
-      ) as Record<keyof Features, number>;
-      const score =
-        100 *
-        (Object.keys(weights) as (keyof Features)[]).reduce(
-          (sum, feature) => sum + weights[feature] * (features[feature] ?? 0),
-          0,
-        );
+      const { weights, score } = scoreFeatures(features, input);
       const reasons = [
         `여유 10%·체류·횡단대기·지도 연결 간격을 포함한 예상 ${buffered.toFixed(1)}분`,
         `OSM 보행 접근 태그로 필터링한 ${input.mode === 'one_way' ? '편도' : input.mode === 'loop' ? '순환' : '동일 경로 왕복'} 경로`,
@@ -1136,9 +1222,7 @@ export function createRouter(data: GraphData) {
           `풍경이 분류된 구간 ${((100 * sceneryKnown) / metres).toFixed(0)}% 중 취향 일치 ${(100 * features.scenery).toFixed(0)}% · 지도 근접 추정`,
         );
       if (input.targetDistanceKm !== undefined)
-        reasons.push(
-          `목표 ${input.targetDistanceKm}km 대비 ${((metres - input.targetDistanceKm * 1000) / 1000).toFixed(2)}km · 최대 ${input.maxDistanceKm}km 이내`,
-        );
+        reasons.push(routeDistanceReason(input, metres));
       if (input.theme && input.theme !== 'any')
         reasons.push(
           `${COURSE_THEMES[input.theme]} 지도 근거가 있는 구간 ${Math.round((terrain.themeMatchRatio ?? 0) * terrain.themeCoverageRatio * 100)}% · 테마가 코스 전체에 이어진다는 뜻은 아님`,
@@ -1237,5 +1321,5 @@ export function createRouter(data: GraphData) {
             : '현재 시간·거리 조건을 만족하는 연결 경로를 찾지 못했습니다. 시간을 늘리거나 가까운 목적지를 선택해 주세요.';
     return result;
   }
-  return { recommend, snap };
+  return { recommend, snap, destinationDistance };
 }
