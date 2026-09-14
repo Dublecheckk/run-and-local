@@ -28,6 +28,25 @@ export type RankedPlace = PlaceCandidate & {
   reasons: string[];
 };
 
+export type DestinationAdjustment = 'theme' | 'out_and_back';
+
+export const DESTINATION_ADJUSTMENT_PENALTIES: Record<
+  DestinationAdjustment,
+  number
+> = {
+  theme: 8,
+  out_and_back: 15,
+};
+
+export function finalDestinationScore(
+  placeScore: number,
+  routeScore: number,
+  adjustment?: DestinationAdjustment,
+) {
+  const penalty = adjustment ? DESTINATION_ADJUSTMENT_PENALTIES[adjustment] : 0;
+  return Math.max(0, placeScore * 0.35 + routeScore * 0.65 - penalty);
+}
+
 export function rankDestinations(input: {
   origin: Coordinate;
   kind: RunKind;
