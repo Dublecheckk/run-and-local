@@ -12,6 +12,17 @@ type RegionGraph = GraphData & {
 
 const file = process.argv[2] ?? 'public/data/seongsu.json';
 const graph = JSON.parse(fs.readFileSync(file, 'utf8')) as RegionGraph;
+const elevationCoverage =
+  graph.nodes.filter((node) => Number.isFinite(node.elevationMeters)).length /
+  graph.nodes.length;
+const gradeCoverage =
+  graph.edges.filter(
+    (edge) =>
+      edge.gradeQuality === 'dem-estimate' &&
+      Number.isFinite(edge.gradePercent),
+  ).length / graph.edges.length;
+assert(elevationCoverage >= 0.99, '성수 노드 고도 커버리지 99% 미만');
+assert(gradeCoverage >= 0.95, '성수 일반 도로 경사 커버리지 95% 미만');
 const pairs = [
   ['서울숲역 인근', '뚝섬역 인근'],
   ['성수역 인근', '뚝섬유원지역 인근'],
@@ -74,4 +85,6 @@ for (const [startName, destinationName] of pairs) {
   assert(result.routes[0].distanceMeters <= 12_000);
 }
 
-console.log('성수 실증권역 연결성 확인: 서울숲·성수·뚝섬.');
+console.log(
+  `성수 실증권역 연결성·고도 확인: 서울숲·성수·뚝섬, 경사 ${Math.round(gradeCoverage * 100)}%.`,
+);

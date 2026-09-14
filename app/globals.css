@@ -1013,6 +1013,12 @@
   margin-bottom: 9px;
   gap: 5px;
 }
+.primary-place-field > label {
+  margin-bottom: 11px;
+  font-size: 17px;
+  font-weight: 750;
+  letter-spacing: -0.35px;
+}
 .form-field label small {
   margin-left: auto;
   font-size: 12px;
@@ -1885,9 +1891,8 @@ body:has(.embedded-app) {
   grid-column: 1 / -1;
   width: 100%;
   margin-bottom: 4px;
-  font-size: 17px;
-  font-weight: 750;
-  letter-spacing: -0.35px;
+  font-size: 14px;
+  font-weight: 650;
 }
 .run-kind-card {
   position: relative;

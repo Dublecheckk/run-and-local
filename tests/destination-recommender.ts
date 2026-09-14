@@ -53,6 +53,19 @@ assert(ranked.every((p) => p.destinationType === 'MEAL'));
 assert.equal(ranked[0].id, 'fit');
 assert(ranked[0].score >= ranked[1].score);
 
+const cafe = rankDestinations({
+  origin: [128.9, 37.8],
+  kind: 'evening',
+  targetDistanceKm: 4,
+  maxDistanceKm: 6,
+  minutes: 50,
+  paceMinKm: 7,
+  pauseMinutes: 5,
+  mode: 'out_and_back',
+  places: [{ ...places[0], id: 'cafe', destinationType: 'CAFE_DESSERT' }],
+});
+assert.equal(cafe.length, 1);
+
 const originalScore = finalDestinationScore(80, 90);
 assert.equal(finalDestinationScore(80, 90, 'theme'), originalScore - 8);
 assert.equal(finalDestinationScore(80, 90, 'out_and_back'), originalScore - 15);

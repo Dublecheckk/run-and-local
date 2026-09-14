@@ -20,7 +20,7 @@ export const DESTINATION_TYPE_LABELS: Record<DestinationType, string> = {
   SHOPPING: '쇼핑',
   DAILY_ERRAND: '생활용무',
   CULTURE_LEISURE: '문화·여가',
-  SOCIAL_NIGHT: '저녁 약속',
+  SOCIAL_NIGHT: '음식·모임',
   SPORTS_WELLNESS: '운동·웰니스',
   CAFE_DESSERT: '카페·디저트',
   REVIEW: '분류 검토 필요',
@@ -43,11 +43,15 @@ export const MISSION_CONTEXTS = {
     source: '신한카드 MC_2',
   },
   EVENING_APPOINTMENT_RUN: {
-    label: '저녁 약속 러닝',
-    prompt: '식사나 약속 장소까지',
-    destinationTypes: ['MEAL', 'SOCIAL_NIGHT'] as DestinationType[],
+    label: '식사·카페 러닝',
+    prompt: '식당이나 카페까지',
+    destinationTypes: [
+      'MEAL',
+      'SOCIAL_NIGHT',
+      'CAFE_DESSERT',
+    ] as DestinationType[],
     contextPrior: 0.082849,
-    source: '신한카드 MC_1 기반 규칙 라벨',
+    source: '신한카드 MC_1 MEAL 기반·카페는 권역 POI 보조',
   },
   CULTURE_LEISURE_RUN: {
     label: '문화생활 러닝',
@@ -66,7 +70,7 @@ export function contextBonus(contextPrior?: number) {
 export function missionForDestinationType(type?: DestinationType) {
   if (!type || type === 'REVIEW' || type === 'EXCLUDE') return null;
   if (type === 'SHOPPING') return 'SHOPPING_DESTINATION_RUN' as const;
-  if (type === 'MEAL' || type === 'SOCIAL_NIGHT')
+  if (type === 'MEAL' || type === 'SOCIAL_NIGHT' || type === 'CAFE_DESSERT')
     return 'EVENING_APPOINTMENT_RUN' as const;
   if (type === 'CULTURE_LEISURE') return 'CULTURE_LEISURE_RUN' as const;
   return 'LIFE_DESTINATION_RUN' as const;

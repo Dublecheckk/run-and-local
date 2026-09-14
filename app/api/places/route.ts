@@ -23,7 +23,10 @@ const KAKAO_SEARCH: Record<RunKind, KakaoSearchPlan[]> = {
     { endpoint: 'category', category: 'CS2' },
     { endpoint: 'keyword', query: '쇼핑' },
   ],
-  evening: [{ endpoint: 'category', category: 'FD6' }],
+  evening: [
+    { endpoint: 'category', category: 'FD6' },
+    { endpoint: 'category', category: 'CE7' },
+  ],
   culture: [
     { endpoint: 'category', category: 'CT1' },
     { endpoint: 'category', category: 'AT4' },

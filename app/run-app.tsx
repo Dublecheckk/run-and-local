@@ -1519,7 +1519,7 @@ export default function RunApp() {
           )}
           {sheet === 'place' && (
             <>
-              <DialogTitle>오늘 어차피 가야 하는 곳</DialogTitle>
+              <DialogTitle>오늘의 목적지</DialogTitle>
               <DialogDescription>
                 식사·쇼핑·문화·생활 일정을 러닝으로 바꿔보세요.
               </DialogDescription>
@@ -1661,8 +1661,9 @@ export default function RunApp() {
                 <h2>{region.name} 시범지역</h2>
                 <p>
                   성수·서울숲·뚝섬과 한강 남·북단 연결 구간의 OSM 보행
-                  도로망에서 코스를 계산해요. 현재 고도·경사는 미확인이며, 실제
-                  공사·현장 통행과 상점 입구는 방문 전 확인해야 해요.
+                  도로망에서 코스를 계산해요. 공개 지표면 고도 모델로 일반
+                  도로의 경사를 추정하며, 실제 공사·현장 통행과 상점 입구는 방문
+                  전 확인해야 해요.
                 </p>
                 <h2>규칙 기반 추천</h2>
                 <p>
@@ -1682,9 +1683,9 @@ export default function RunApp() {
                 </p>
                 <h2>고도·경사 데이터</h2>
                 <p>
-                  성수 실증판은 고도 데이터를 아직 결합하지 않아 경사를
-                  ‘미확인’으로 표시해요. 경사 선호는 고도 결합 후 정밀하게
-                  반영할 예정이에요.
+                  AWS Open Data의 Mapzen Terrain Tiles를 성수 도로망에 결합해
+                  일반 도로의 추정 경사를 계산해요. 지표면과 실제 구조물 높이가
+                  다를 수 있는 교량·터널·계단은 ‘미확인’으로 분리합니다.
                 </p>
                 {graph?.metadata.terrain && (
                   <p className="dem-attribution">

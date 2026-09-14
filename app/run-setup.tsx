@@ -101,7 +101,7 @@ const runKindPresentation = {
   },
   evening: {
     icon: UtensilsCrossed,
-    prompt: '식사나 약속 장소까지',
+    prompt: '식당이나 카페까지',
   },
   culture: {
     icon: CalendarDays,
@@ -955,8 +955,8 @@ export default function RunSetup({
               </p>
             ) : (
               <>
-                <div className="form-field">
-                  <label htmlFor="setup-origin">오늘의 출발점</label>
+                <div className="form-field primary-place-field">
+                  <label htmlFor="setup-origin">오늘의 출발지</label>
                   <Select
                     value={preset?.nodeId ?? 'custom'}
                     onValueChange={(nodeId) => {
@@ -1091,9 +1091,9 @@ export default function RunSetup({
                     <p>지도를 눌러 출발점을 바꿀 수 있어요.</p>
                   </div>
                 )}
-                <div className="form-field destination-setup">
+                <div className="form-field destination-setup primary-place-field">
                   <label htmlFor="setup-destination-search">
-                    오늘 어차피 가야 하는 곳
+                    오늘의 목적지
                   </label>
                   <Combobox
                     autoHighlight

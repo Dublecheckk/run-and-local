@@ -38,6 +38,7 @@ assert.equal(contextBonus(0), 0);
 assert.equal(contextBonus(0.5), 2.5);
 assert.equal(contextBonus(10), 5);
 assert.equal(missionLabelForDestinationType('SHOPPING'), '쇼핑 목적지 러닝');
-assert.equal(missionLabelForDestinationType('MEAL'), '저녁 약속 러닝');
+assert.equal(missionLabelForDestinationType('MEAL'), '식사·카페 러닝');
+assert.equal(missionLabelForDestinationType('CAFE_DESSERT'), '식사·카페 러닝');
 
 console.log('Destination type and mission context checks passed.');

@@ -126,8 +126,8 @@ export default function RouteTerrain({
         </p>
       )}
       <p className="terrain-method">
-        약 30m 지표면 모델을 평활화한 60m 이상 간격의 추정이에요. 건물·나무가
-        포함되며 실제 도로 경사와 다를 수 있어요.
+        공개 지표면 고도 타일을 도로망 주변에서 평활화하고 최소 60m 기준으로
+        계산한 추정이에요. 실제 도로 경사와 다를 수 있어요.
       </p>
     </section>
   );
